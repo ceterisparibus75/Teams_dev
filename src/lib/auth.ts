@@ -3,6 +3,15 @@ import AzureADProvider from 'next-auth/providers/azure-ad'
 import { prisma } from '@/lib/prisma'
 
 export const authOptions: NextAuthOptions = {
+  debug: true,
+  logger: {
+    error(code, metadata) {
+      console.error('[NextAuth Error]', code, JSON.stringify(metadata))
+    },
+    warn(code) {
+      console.warn('[NextAuth Warn]', code)
+    },
+  },
   providers: [
     AzureADProvider({
       clientId: process.env.AZURE_AD_CLIENT_ID!,
