@@ -13,6 +13,7 @@ export const authOptions: NextAuthOptions = {
           scope: 'openid profile email offline_access User.Read Calendars.Read',
         },
       },
+      checks: ['state'],
     }),
   ],
   session: { strategy: 'jwt' },
