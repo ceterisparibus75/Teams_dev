@@ -5,25 +5,35 @@ import { prisma } from '@/lib/prisma'
 import { generateMinutesContent, type GenerationStyle } from '@/lib/azure-openai'
 import { getTranscriptionResult } from '@/lib/microsoft-graph'
 
+function withDetail(message: string, detail?: string) {
+  return detail ? `${message} Détail Graph: ${detail}` : message
+}
+
 function buildTranscriptionError(result: Exclude<Awaited<ReturnType<typeof getTranscriptionResult>>, { ok: true }>) {
   switch (result.reason) {
     case 'missing_connection':
       return {
         status: 401,
-        error:
+        error: withDetail(
           'Compte Microsoft non connecté. Déconnectez-vous puis reconnectez-vous avec Microsoft 365 avant de relancer la retranscription.',
+          result.detail
+        ),
       }
     case 'reauth_required':
       return {
         status: 401,
-        error:
+        error: withDetail(
           'Autorisation Microsoft expirée ou incomplète. Déconnectez-vous puis reconnectez-vous pour autoriser la lecture des transcriptions Teams.',
+          result.detail
+        ),
       }
     case 'permission_denied':
       return {
         status: 403,
-        error:
+        error: withDetail(
           'Microsoft Graph refuse l’accès aux transcriptions. Vérifiez que la permission Azure "OnlineMeetingTranscript.Read.All" a bien été ajoutée et consentie.',
+          result.detail
+        ),
       }
     case 'meeting_not_found':
       return {
@@ -52,8 +62,10 @@ function buildTranscriptionError(result: Exclude<Awaited<ReturnType<typeof getTr
     default:
       return {
         status: 502,
-        error:
+        error: withDetail(
           'Erreur Microsoft Graph lors de la récupération de la transcription. Vérifiez la connexion Microsoft puis réessayez.',
+          result.detail
+        ),
       }
   }
 }

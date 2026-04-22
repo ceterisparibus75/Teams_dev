@@ -32,10 +32,35 @@ export type TranscriptionResult =
 
 function getErrorMessage(error: unknown): string | undefined {
   if (typeof error === 'string') return error
-  if (error && typeof error === 'object' && 'message' in error && typeof error.message === 'string') {
+  if (!error || typeof error !== 'object') return undefined
+
+  if ('message' in error && typeof error.message === 'string') {
     return error.message
   }
-  return undefined
+
+  if (
+    'body' in error &&
+    error.body &&
+    typeof error.body === 'object' &&
+    'error' in error.body &&
+    error.body.error &&
+    typeof error.body.error === 'object'
+  ) {
+    const graphError = error.body.error as { code?: unknown; message?: unknown }
+    const code = typeof graphError.code === 'string' ? graphError.code : undefined
+    const message = typeof graphError.message === 'string' ? graphError.message : undefined
+    return [code, message].filter(Boolean).join(': ') || undefined
+  }
+
+  if ('code' in error && typeof error.code === 'string') {
+    return error.code
+  }
+
+  try {
+    return JSON.stringify(error)
+  } catch {
+    return undefined
+  }
 }
 
 function isReauthError(error: unknown): boolean {
