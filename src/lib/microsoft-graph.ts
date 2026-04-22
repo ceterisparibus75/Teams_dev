@@ -143,6 +143,62 @@ function escapeODataString(value: string): string {
   return value.replace(/'/g, "''")
 }
 
+function buildGraphErrorDetail(status: number, payloadText: string): string {
+  try {
+    const payload = JSON.parse(payloadText) as {
+      error?: { code?: string; message?: string }
+    }
+
+    const code = payload.error?.code
+    const message = payload.error?.message
+    if (code || message) {
+      return [status, code, message].filter(Boolean).join(' - ')
+    }
+  } catch {
+    // Ignore JSON parsing issues and fall back to raw text.
+  }
+
+  return [status, payloadText.trim()].filter(Boolean).join(' - ')
+}
+
+async function graphGetJson<T>(accessToken: string, path: string, query?: URLSearchParams): Promise<T> {
+  const url = new URL(`https://graph.microsoft.com/v1.0${path}`)
+  if (query) url.search = query.toString()
+
+  const response = await fetch(url, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      Accept: 'application/json',
+    },
+  })
+
+  const payloadText = await response.text()
+  if (!response.ok) {
+    throw new Error(buildGraphErrorDetail(response.status, payloadText))
+  }
+
+  return JSON.parse(payloadText) as T
+}
+
+async function graphGetText(accessToken: string, path: string, query?: URLSearchParams): Promise<string> {
+  const url = new URL(`https://graph.microsoft.com/v1.0${path}`)
+  if (query) url.search = query.toString()
+
+  const response = await fetch(url, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      Accept: 'text/vtt, text/plain, application/octet-stream',
+    },
+  })
+
+  const payloadText = await response.text()
+  if (!response.ok) {
+    throw new Error(buildGraphErrorDetail(response.status, payloadText))
+  }
+
+  return payloadText
+}
+
 // ─── Meetings ──────────────────────────────────────────────────────────────
 
 interface CalendarEvent {
@@ -263,20 +319,23 @@ export async function getTranscriptionResult(
   }
 
   try {
-    const client = graphClient(tokenResult.accessToken)
     const escapedJoinUrl = escapeODataString(joinUrl)
+    const meetingLookup = new URLSearchParams({
+      '$filter': `JoinWebUrl eq '${escapedJoinUrl}'`,
+    })
 
     // Resolve joinUrl → online meeting ID
-    const lookup = await client
-      .api('/me/onlineMeetings')
-      .filter(`JoinWebUrl eq '${escapedJoinUrl}'`)
-      .get()
+    const lookup = await graphGetJson<{ value?: Array<{ id?: string }> }>(
+      tokenResult.accessToken,
+      '/me/onlineMeetings',
+      meetingLookup
+    )
     const onlineMeetingId = lookup.value?.[0]?.id
     if (!onlineMeetingId) return { ok: false, reason: 'meeting_not_found' }
 
-    const transcripts = await client
-      .api(`/me/onlineMeetings/${onlineMeetingId}/transcripts`)
-      .get()
+    const transcripts = await graphGetJson<{
+      value?: Array<{ id?: string; createdDateTime?: string }>
+    }>(tokenResult.accessToken, `/me/onlineMeetings/${encodeURIComponent(onlineMeetingId)}/transcripts`)
 
     if (!transcripts.value?.length) return { ok: false, reason: 'transcript_not_found' }
 
@@ -287,10 +346,11 @@ export async function getTranscriptionResult(
     const transcriptId = latestTranscript?.id
     if (!transcriptId) return { ok: false, reason: 'transcript_not_found' }
 
-    const content = await client
-      .api(`/me/onlineMeetings/${onlineMeetingId}/transcripts/${transcriptId}/content`)
-      .responseType('text' as never)
-      .get()
+    const content = await graphGetText(
+      tokenResult.accessToken,
+      `/me/onlineMeetings/${encodeURIComponent(onlineMeetingId)}/transcripts/${encodeURIComponent(transcriptId)}/content`,
+      new URLSearchParams({ '$format': 'text/vtt' })
+    )
 
     if (typeof content !== 'string') {
       return { ok: false, reason: 'transcript_empty' }
