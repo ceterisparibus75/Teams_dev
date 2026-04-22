@@ -4,9 +4,54 @@ import { prisma } from '@/lib/prisma'
 import { MICROSOFT_GRAPH_SCOPES } from '@/lib/microsoft-scopes'
 import type { GraphMeeting } from '@/types'
 
+type AccessTokenResult =
+  | { ok: true; accessToken: string }
+  | {
+      ok: false
+      reason: 'missing_connection' | 'reauth_required' | 'graph_error'
+      detail?: string
+    }
+
+export type TranscriptionResult =
+  | { ok: true; transcription: string }
+  | {
+      ok: false
+      reason:
+        | 'missing_join_url'
+        | 'missing_connection'
+        | 'reauth_required'
+        | 'permission_denied'
+        | 'meeting_not_found'
+        | 'transcript_not_found'
+        | 'transcript_empty'
+        | 'graph_error'
+      detail?: string
+    }
+
 // ─── Token management ──────────────────────────────────────────────────────
 
-export async function getValidAccessToken(userId: string): Promise<string | null> {
+function getErrorMessage(error: unknown): string | undefined {
+  if (typeof error === 'string') return error
+  if (error && typeof error === 'object' && 'message' in error && typeof error.message === 'string') {
+    return error.message
+  }
+  return undefined
+}
+
+function isReauthError(error: unknown): boolean {
+  const message = getErrorMessage(error)?.toLowerCase() ?? ''
+
+  return (
+    message.includes('interaction_required') ||
+    message.includes('consent_required') ||
+    message.includes('invalid_grant') ||
+    message.includes('aadsts65001') ||
+    message.includes('aadsts65004') ||
+    message.includes('aadsts700082')
+  )
+}
+
+async function getAccessTokenResult(userId: string): Promise<AccessTokenResult> {
   const user = await prisma.user.findUnique({
     where: { id: userId },
     select: {
@@ -16,11 +61,13 @@ export async function getValidAccessToken(userId: string): Promise<string | null
     },
   })
 
-  if (!user?.microsoftRefreshToken) return null
+  if (!user?.microsoftRefreshToken) {
+    return { ok: false, reason: 'missing_connection' }
+  }
 
   if (user.microsoftAccessToken && user.microsoftTokenExpiry) {
     if (Date.now() < new Date(user.microsoftTokenExpiry).getTime() - 5 * 60 * 1000) {
-      return user.microsoftAccessToken
+      return { ok: true, accessToken: user.microsoftAccessToken }
     }
   }
 
@@ -37,7 +84,9 @@ export async function getValidAccessToken(userId: string): Promise<string | null
       refreshToken: user.microsoftRefreshToken,
       scopes: [...MICROSOFT_GRAPH_SCOPES],
     })
-    if (!result) return null
+    if (!result?.accessToken) {
+      return { ok: false, reason: 'graph_error', detail: 'Token Microsoft introuvable après refresh.' }
+    }
 
     await prisma.user.update({
       where: { id: userId },
@@ -46,11 +95,19 @@ export async function getValidAccessToken(userId: string): Promise<string | null
         microsoftTokenExpiry: result.expiresOn ?? new Date(Date.now() + 3600 * 1000),
       },
     })
-    return result.accessToken
+    return { ok: true, accessToken: result.accessToken }
   } catch (error) {
     console.error('[getValidAccessToken]', error)
-    return null
+    if (isReauthError(error)) {
+      return { ok: false, reason: 'reauth_required', detail: getErrorMessage(error) }
+    }
+    return { ok: false, reason: 'graph_error', detail: getErrorMessage(error) }
   }
+}
+
+export async function getValidAccessToken(userId: string): Promise<string | null> {
+  const result = await getAccessTokenResult(userId)
+  return result.ok ? result.accessToken : null
 }
 
 function graphClient(accessToken: string): Client {
@@ -147,13 +204,41 @@ export async function getTranscription(
   userId: string,
   joinUrl: string | null | undefined
 ): Promise<string | null> {
-  if (!joinUrl) return null
+  const result = await getTranscriptionResult(userId, joinUrl)
+  return result.ok ? result.transcription : null
+}
 
-  const token = await getValidAccessToken(userId)
-  if (!token) return null
+function isPermissionError(error: unknown): boolean {
+  const message = getErrorMessage(error)?.toLowerCase() ?? ''
+
+  return (
+    message.includes('forbidden') ||
+    message.includes('no permissions in access token') ||
+    message.includes('insufficient privileges') ||
+    message.includes('access is denied') ||
+    message.includes('authorization_requestdenied')
+  )
+}
+
+export async function getTranscriptionResult(
+  userId: string,
+  joinUrl: string | null | undefined
+): Promise<TranscriptionResult> {
+  if (!joinUrl) return { ok: false, reason: 'missing_join_url' }
+
+  const tokenResult = await getAccessTokenResult(userId)
+  if (!tokenResult.ok) {
+    if (tokenResult.reason === 'missing_connection') {
+      return { ok: false, reason: 'missing_connection' }
+    }
+    if (tokenResult.reason === 'reauth_required') {
+      return { ok: false, reason: 'reauth_required', detail: tokenResult.detail }
+    }
+    return { ok: false, reason: 'graph_error', detail: tokenResult.detail }
+  }
 
   try {
-    const client = graphClient(token)
+    const client = graphClient(tokenResult.accessToken)
     const escapedJoinUrl = escapeODataString(joinUrl)
 
     // Resolve joinUrl → online meeting ID
@@ -163,27 +248,29 @@ export async function getTranscription(
       .select('id')
       .get()
     const onlineMeetingId = lookup.value?.[0]?.id
-    if (!onlineMeetingId) return null
+    if (!onlineMeetingId) return { ok: false, reason: 'meeting_not_found' }
 
     const transcripts = await client
       .api(`/me/onlineMeetings/${onlineMeetingId}/transcripts`)
       .get()
 
-    if (!transcripts.value?.length) return null
+    if (!transcripts.value?.length) return { ok: false, reason: 'transcript_not_found' }
 
     const latestTranscript = [...transcripts.value].sort(
       (a, b) =>
         new Date(b.createdDateTime ?? 0).getTime() - new Date(a.createdDateTime ?? 0).getTime()
     )[0]
     const transcriptId = latestTranscript?.id
-    if (!transcriptId) return null
+    if (!transcriptId) return { ok: false, reason: 'transcript_not_found' }
 
     const content = await client
       .api(`/me/onlineMeetings/${onlineMeetingId}/transcripts/${transcriptId}/content`)
       .responseType('text' as never)
       .get()
 
-    if (typeof content !== 'string') return null
+    if (typeof content !== 'string') {
+      return { ok: false, reason: 'transcript_empty' }
+    }
 
     // Parse VTT into readable text "[Speaker] text" lines
     const lines: string[] = []
@@ -194,9 +281,22 @@ export async function getTranscription(
         if (text) lines.push(`[${match[1].trim()}] ${text}`)
       }
     }
-    return lines.join('\n') || null
+    const transcription = lines.join('\n')
+    if (!transcription) {
+      return { ok: false, reason: 'transcript_empty' }
+    }
+
+    return { ok: true, transcription }
   } catch (error) {
     console.error('[getTranscription]', error)
-    return null
+    if (isPermissionError(error)) {
+      return { ok: false, reason: 'permission_denied', detail: getErrorMessage(error) }
+    }
+
+    if (isReauthError(error)) {
+      return { ok: false, reason: 'reauth_required', detail: getErrorMessage(error) }
+    }
+
+    return { ok: false, reason: 'graph_error', detail: getErrorMessage(error) }
   }
 }

@@ -3,7 +3,60 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { generateMinutesContent, type GenerationStyle } from '@/lib/azure-openai'
-import { getTranscription } from '@/lib/microsoft-graph'
+import { getTranscriptionResult } from '@/lib/microsoft-graph'
+
+function buildTranscriptionError(result: Exclude<Awaited<ReturnType<typeof getTranscriptionResult>>, { ok: true }>) {
+  switch (result.reason) {
+    case 'missing_connection':
+      return {
+        status: 401,
+        error:
+          'Compte Microsoft non connecté. Déconnectez-vous puis reconnectez-vous avec Microsoft 365 avant de relancer la retranscription.',
+      }
+    case 'reauth_required':
+      return {
+        status: 401,
+        error:
+          'Autorisation Microsoft expirée ou incomplète. Déconnectez-vous puis reconnectez-vous pour autoriser la lecture des transcriptions Teams.',
+      }
+    case 'permission_denied':
+      return {
+        status: 403,
+        error:
+          'Microsoft Graph refuse l’accès aux transcriptions. Vérifiez que la permission Azure "OnlineMeetingTranscript.Read.All" a bien été ajoutée et consentie.',
+      }
+    case 'meeting_not_found':
+      return {
+        status: 422,
+        error:
+          'Réunion introuvable dans Microsoft Graph via son lien Teams. Ouvrez la réunion depuis le calendrier synchronisé puis réessayez.',
+      }
+    case 'transcript_not_found':
+      return {
+        status: 422,
+        error:
+          'Aucune transcription disponible pour cette réunion. Vérifiez que la transcription Teams a bien été démarrée et attendez quelques minutes après la fin de la réunion.',
+      }
+    case 'transcript_empty':
+      return {
+        status: 422,
+        error:
+          'La transcription Teams a été trouvée mais son contenu est vide pour l’instant. Réessayez dans quelques minutes.',
+      }
+    case 'missing_join_url':
+      return {
+        status: 422,
+        error: 'Lien de réunion manquant en base.',
+      }
+    case 'graph_error':
+    default:
+      return {
+        status: 502,
+        error:
+          'Erreur Microsoft Graph lors de la récupération de la transcription. Vérifiez la connexion Microsoft puis réessayez.',
+      }
+  }
+}
 
 export async function POST(
   req: NextRequest,
@@ -35,19 +88,21 @@ export async function POST(
   if (!meeting.joinUrl)
     return NextResponse.json({ error: 'Lien de réunion manquant en base' }, { status: 422 })
 
-  const transcript = await getTranscription(session.user.id, meeting.joinUrl)
+  const transcriptResult = await getTranscriptionResult(session.user.id, meeting.joinUrl)
 
-  if (!transcript) {
+  if (!transcriptResult.ok) {
+    const response = buildTranscriptionError(transcriptResult)
     return NextResponse.json(
       {
-        error:
-          'Transcription introuvable — vérifiez que la transcription Teams a bien été démarrée puis reconnectez votre compte Microsoft pour autoriser la lecture des transcriptions.',
+        error: response.error,
+        code: transcriptResult.reason,
+        detail: transcriptResult.detail ?? null,
       },
-      { status: 422 }
+      { status: response.status }
     )
   }
 
-  const content = await generateMinutesContent(meeting.subject, transcript, style)
+  const content = await generateMinutesContent(meeting.subject, transcriptResult.transcription, style)
 
   await prisma.meetingMinutes.update({
     where: { meetingId },
