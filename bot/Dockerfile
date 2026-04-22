@@ -3,11 +3,15 @@
 
 FROM node:20-bookworm-slim
 
+# ── Variables d'environnement AVANT npm install ──────────────────────────────
+# Indispensable pour que Playwright ne télécharge pas Chromium pendant npm ci
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+ENV PLAYWRIGHT_CHROMIUM_PATH=/usr/bin/chromium
+ENV BOT_DISPLAY=:99
+
 # ── Dépendances système ──────────────────────────────────────────────────────
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    # Navigateur Chromium + dépendances Playwright
     chromium \
-    chromium-driver \
     libnss3 \
     libatk1.0-0 \
     libatk-bridge2.0-0 \
@@ -19,15 +23,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxrandr2 \
     libgbm1 \
     libasound2 \
-    # Écran virtuel (requis pour Playwright headless=false)
     xvfb \
     x11-utils \
-    # Son virtuel (capture audio des réunions)
     pulseaudio \
     pulseaudio-utils \
-    # Enregistrement audio
     ffmpeg \
-    # Utilitaires
     curl \
     ca-certificates \
   && apt-get clean \
@@ -42,26 +42,17 @@ RUN mkdir -p /tmp/pulse && \
 # ── Application ──────────────────────────────────────────────────────────────
 WORKDIR /app
 
-# Installer les dépendances Node
 COPY package*.json ./
-RUN npm ci --omit=dev
 
-# Copier les sources du bot
+# Inclure les devDependencies car ts-node et typescript sont nécessaires au runtime
+RUN npm ci
+
 COPY bot/               ./bot/
 COPY prisma/            ./prisma/
 COPY tsconfig.bot.json  ./
 
-# Générer le client Prisma
 RUN npx prisma generate
 
-# Indiquer à Playwright d'utiliser le Chromium système
-ENV PLAYWRIGHT_CHROMIUM_PATH=/usr/bin/chromium
-ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
-
-# Numéro d'écran Xvfb
-ENV BOT_DISPLAY=:99
-
-# ── Script de démarrage ───────────────────────────────────────────────────────
 COPY bot/docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh
 
