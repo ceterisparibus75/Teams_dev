@@ -1,0 +1,85 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id                    String                @id @default(cuid())
+  email                 String                @unique
+  name                  String
+  microsoftId           String?               @unique
+  microsoftAccessToken  String?
+  microsoftRefreshToken String?
+  microsoftTokenExpiry  DateTime?
+  organizedMeetings     Meeting[]
+  collaborations        MeetingCollaborator[]
+  minutes               MeetingMinutes[]
+  createdAt             DateTime              @default(now())
+}
+
+model Meeting {
+  id               String                @id
+  subject          String
+  startDateTime    DateTime
+  endDateTime      DateTime
+  organizerId      String
+  organizer        User                  @relation(fields: [organizerId], references: [id])
+  participants     MeetingParticipant[]
+  collaborators    MeetingCollaborator[]
+  hasTranscription Boolean               @default(false)
+  processedAt      DateTime?
+  minutes          MeetingMinutes?
+  createdAt        DateTime              @default(now())
+}
+
+model MeetingParticipant {
+  id        String  @id @default(cuid())
+  meetingId String
+  meeting   Meeting @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  name      String
+  email     String
+}
+
+model MeetingCollaborator {
+  meetingId String
+  userId    String
+  meeting   Meeting @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  user      User    @relation(fields: [userId], references: [id])
+  @@id([meetingId, userId])
+}
+
+model MeetingMinutes {
+  id         String        @id @default(cuid())
+  meetingId  String        @unique
+  meeting    Meeting       @relation(fields: [meetingId], references: [id])
+  authorId   String
+  author     User          @relation(fields: [authorId], references: [id])
+  templateId String?
+  template   Template?     @relation(fields: [templateId], references: [id])
+  status     MinutesStatus @default(DRAFT)
+  content    Json
+  sentAt     DateTime?
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
+}
+
+model Template {
+  id         String           @id @default(cuid())
+  name       String
+  sections   Json
+  headerHtml String?
+  footerHtml String?
+  isDefault  Boolean          @default(false)
+  minutes    MeetingMinutes[]
+  createdAt  DateTime         @default(now())
+}
+
+enum MinutesStatus {
+  DRAFT
+  REVIEWED
+  SENT
+}
