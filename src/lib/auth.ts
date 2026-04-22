@@ -67,11 +67,15 @@ export const authOptions: NextAuthOptions = {
       return token
     },
     async session({ session, token }) {
-      const user = await prisma.user.findUnique({
-        where: { email: session.user.email! },
-        select: { id: true },
-      })
-      if (user) session.user.id = user.id
+      try {
+        const user = await prisma.user.findUnique({
+          where: { email: session.user.email! },
+          select: { id: true },
+        })
+        if (user) session.user.id = user.id
+      } catch (dbError) {
+        console.error('[auth] session DB lookup failed:', dbError)
+      }
       session.accessToken = token.accessToken as string | undefined
       return session
     },
