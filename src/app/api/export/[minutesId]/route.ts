@@ -35,7 +35,7 @@ export async function GET(
   if (!minutes) return NextResponse.json({ error: 'Introuvable' }, { status: 404 })
 
   const sections: TemplateSection[] = minutes.template
-    ? (minutes.template.sections as TemplateSection[])
+    ? (minutes.template.sections as unknown as TemplateSection[])
     : DEFAULT_SECTIONS
 
   const docxBuffer = await generateDocx({
@@ -49,7 +49,7 @@ export async function GET(
 
   const filename = buildDocxFilename(minutes.meeting.subject, minutes.meeting.startDateTime)
 
-  return new NextResponse(docxBuffer, {
+  return new NextResponse(docxBuffer as unknown as BodyInit, {
     headers: {
       'Content-Type': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
       'Content-Disposition': `attachment; filename="${filename}"`,

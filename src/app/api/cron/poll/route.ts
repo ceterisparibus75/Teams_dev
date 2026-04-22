@@ -80,7 +80,7 @@ export async function GET(req: NextRequest) {
           meetingId: gm.id,
           authorId: user.id,
           templateId: defaultTemplate?.id ?? null,
-          content,
+          content: content as unknown as import('@prisma/client').Prisma.InputJsonValue,
           status: 'DRAFT',
         },
       })

@@ -40,7 +40,7 @@ export async function POST(
   if (!minutes) return NextResponse.json({ error: 'Introuvable' }, { status: 404 })
 
   const sections: TemplateSection[] = minutes.template
-    ? (minutes.template.sections as TemplateSection[])
+    ? (minutes.template.sections as unknown as TemplateSection[])
     : DEFAULT_SECTIONS
 
   const docxBuffer = await generateDocx({

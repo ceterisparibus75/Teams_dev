@@ -62,8 +62,6 @@ function actionsTable(actions: MinutesContent['actions']): Table {
       bottom: { style: BorderStyle.SINGLE, size: 1 },
       left: { style: BorderStyle.SINGLE, size: 1 },
       right: { style: BorderStyle.SINGLE, size: 1 },
-      insideH: { style: BorderStyle.SINGLE, size: 1 },
-      insideV: { style: BorderStyle.SINGLE, size: 1 },
     },
     rows: [headerRow, ...dataRows],
   })

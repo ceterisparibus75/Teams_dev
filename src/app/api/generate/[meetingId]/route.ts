@@ -43,7 +43,7 @@ export async function POST(
       meetingId,
       authorId: session.user.id,
       templateId: defaultTemplate?.id ?? null,
-      content,
+      content: content as unknown as import('@prisma/client').Prisma.InputJsonValue,
       status: 'DRAFT',
     },
   })
