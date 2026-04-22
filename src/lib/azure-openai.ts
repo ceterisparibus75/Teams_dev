@@ -1,4 +1,4 @@
-import OpenAI from 'openai'
+import Anthropic from '@anthropic-ai/sdk'
 import type { MinutesContent } from '@/types'
 
 const DEFAULT_CONTENT: MinutesContent = {
@@ -49,18 +49,15 @@ export function parseMinutesContent(raw: string): MinutesContent {
   }
 }
 
-let openaiClient: OpenAI | null = null
+let anthropicClient: Anthropic | null = null
 
-function getClient(): OpenAI {
-  if (!openaiClient) {
-    openaiClient = new OpenAI({
-      apiKey: process.env.AZURE_OPENAI_API_KEY!,
-      baseURL: `${process.env.AZURE_OPENAI_ENDPOINT}/openai/deployments/${process.env.AZURE_OPENAI_DEPLOYMENT}`,
-      defaultQuery: { 'api-version': '2024-02-01' },
-      defaultHeaders: { 'api-key': process.env.AZURE_OPENAI_API_KEY! },
+function getClient(): Anthropic {
+  if (!anthropicClient) {
+    anthropicClient = new Anthropic({
+      apiKey: process.env.ANTHROPIC_API_KEY!,
     })
   }
-  return openaiClient
+  return anthropicClient
 }
 
 export async function generateMinutesContent(
@@ -71,16 +68,15 @@ export async function generateMinutesContent(
   const prompt = buildPrompt(subject, transcription)
 
   try {
-    const response = await client.chat.completions.create({
-      model: process.env.AZURE_OPENAI_DEPLOYMENT!,
-      messages: [{ role: 'user', content: prompt }],
-      temperature: 0.2,
+    const response = await client.messages.create({
+      model: 'claude-sonnet-4-6',
       max_tokens: 2000,
+      messages: [{ role: 'user', content: prompt }],
     })
-    const raw = response.choices[0]?.message?.content ?? ''
+    const raw = response.content[0]?.type === 'text' ? response.content[0].text : ''
     return parseMinutesContent(raw)
   } catch (error) {
-    console.error('[Azure OpenAI] Generation failed:', error)
+    console.error('[Claude] Generation failed:', error)
     return { ...DEFAULT_CONTENT }
   }
 }
