@@ -1,6 +1,7 @@
 import { NextAuthOptions } from 'next-auth'
 import AzureADProvider from 'next-auth/providers/azure-ad'
 import { prisma } from '@/lib/prisma'
+import { MICROSOFT_AUTHORIZATION_SCOPE } from '@/lib/microsoft-scopes'
 
 export const authOptions: NextAuthOptions = {
   providers: [
@@ -10,7 +11,7 @@ export const authOptions: NextAuthOptions = {
       tenantId: process.env.AZURE_AD_TENANT_ID!,
       authorization: {
         params: {
-          scope: 'openid profile email offline_access User.Read Calendars.Read OnlineMeetings.Read',
+          scope: MICROSOFT_AUTHORIZATION_SCOPE,
         },
       },
       checks: ['state'],

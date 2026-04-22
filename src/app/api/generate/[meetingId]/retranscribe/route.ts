@@ -39,7 +39,10 @@ export async function POST(
 
   if (!transcript) {
     return NextResponse.json(
-      { error: 'Transcription introuvable — assurez-vous que la transcription a été démarrée dans Teams et que vous êtes connecté avec un compte valide' },
+      {
+        error:
+          'Transcription introuvable — vérifiez que la transcription Teams a bien été démarrée puis reconnectez votre compte Microsoft pour autoriser la lecture des transcriptions.',
+      },
       { status: 422 }
     )
   }

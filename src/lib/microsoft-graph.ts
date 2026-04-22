@@ -1,6 +1,7 @@
 import { Client } from '@microsoft/microsoft-graph-client'
 import { ConfidentialClientApplication } from '@azure/msal-node'
 import { prisma } from '@/lib/prisma'
+import { MICROSOFT_GRAPH_SCOPES } from '@/lib/microsoft-scopes'
 import type { GraphMeeting } from '@/types'
 
 // ─── Token management ──────────────────────────────────────────────────────
@@ -34,7 +35,7 @@ export async function getValidAccessToken(userId: string): Promise<string | null
   try {
     const result = await cca.acquireTokenByRefreshToken({
       refreshToken: user.microsoftRefreshToken,
-      scopes: ['User.Read', 'OnlineMeetings.Read', 'Calendars.Read', 'Mail.Send'],
+      scopes: [...MICROSOFT_GRAPH_SCOPES],
     })
     if (!result) return null
 
@@ -54,6 +55,10 @@ export async function getValidAccessToken(userId: string): Promise<string | null
 
 function graphClient(accessToken: string): Client {
   return Client.init({ authProvider: (done) => done(null, accessToken) })
+}
+
+function escapeODataString(value: string): string {
+  return value.replace(/'/g, "''")
 }
 
 // ─── Meetings ──────────────────────────────────────────────────────────────
@@ -149,11 +154,12 @@ export async function getTranscription(
 
   try {
     const client = graphClient(token)
+    const escapedJoinUrl = escapeODataString(joinUrl)
 
     // Resolve joinUrl → online meeting ID
     const lookup = await client
       .api('/me/onlineMeetings')
-      .filter(`JoinWebUrl eq '${joinUrl}'`)
+      .filter(`JoinWebUrl eq '${escapedJoinUrl}'`)
       .select('id')
       .get()
     const onlineMeetingId = lookup.value?.[0]?.id
@@ -165,7 +171,13 @@ export async function getTranscription(
 
     if (!transcripts.value?.length) return null
 
-    const transcriptId = transcripts.value[0].id
+    const latestTranscript = [...transcripts.value].sort(
+      (a, b) =>
+        new Date(b.createdDateTime ?? 0).getTime() - new Date(a.createdDateTime ?? 0).getTime()
+    )[0]
+    const transcriptId = latestTranscript?.id
+    if (!transcriptId) return null
+
     const content = await client
       .api(`/me/onlineMeetings/${onlineMeetingId}/transcripts/${transcriptId}/content`)
       .responseType('text' as never)
