@@ -302,6 +302,31 @@ async function graphGetText(accessToken: string, path: string, query?: URLSearch
   return payloadText
 }
 
+async function graphPostJson<T>(
+  accessToken: string,
+  path: string,
+  body: Record<string, unknown>
+): Promise<T> {
+  const url = new URL(`https://graph.microsoft.com/v1.0${path}`)
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  })
+
+  const payloadText = await response.text()
+  if (!response.ok) {
+    throw new Error(buildGraphErrorDetail(response.status, payloadText))
+  }
+
+  return JSON.parse(payloadText) as T
+}
+
 function simplifyQueryTerm(value: string): string {
   return value
     .normalize('NFKD')
@@ -394,9 +419,32 @@ async function searchTranscriptFile(
   )
 
   for (const queryText of searchQueries) {
-    const searchPath = `/me/drive/search(q='${encodeURIComponent(queryText).replace(/'/g, "%27")}')`
-    const results = await graphGetJson<{ value?: DriveItemLike[] }>(accessToken, searchPath)
+    const results = await graphPostJson<{
+      value?: Array<{
+        hitsContainers?: Array<{
+          hits?: Array<{
+            resource?: DriveItemLike
+          }>
+        }>
+      }>
+    }>(accessToken, '/search/query', {
+      requests: [
+        {
+          entityTypes: ['driveItem'],
+          query: {
+            queryString: `"${queryText}" AND (filetype:vtt OR filetype:docx)`,
+          },
+          from: 0,
+          size: 25,
+        },
+      ],
+    })
+
     const candidates = (results.value ?? [])
+      .flatMap((container) => container.hitsContainers ?? [])
+      .flatMap((container) => container.hits ?? [])
+      .map((hit) => hit.resource)
+      .filter((item): item is DriveItemLike => Boolean(item))
       .filter((item) => {
         const ref = extractDriveReference(item)
         const name = (ref.name ?? '').toLowerCase()
