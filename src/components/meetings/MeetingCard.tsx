@@ -3,7 +3,7 @@ import { useState } from 'react'
 import { toast } from 'sonner'
 import { formatDateTime } from '@/lib/utils'
 import { Badge } from '@/components/ui'
-import { Users, Mic, MicOff, RefreshCw } from 'lucide-react'
+import { Users, Mic, MicOff, RefreshCw, FileText, AlignLeft } from 'lucide-react'
 
 interface Meeting {
   id: string
@@ -16,7 +16,7 @@ interface Meeting {
 
 interface MeetingCardProps {
   meeting: Meeting
-  onGenerate: (meetingId: string) => void
+  onGenerate: (meetingId: string, style: 'detailed' | 'concise') => void
   generating?: boolean
 }
 
@@ -30,10 +30,14 @@ export function MeetingCard({ meeting, onGenerate, generating }: MeetingCardProp
   const [retranscribing, setRetranscribing] = useState(false)
   const status = meeting.minutes ? statusLabel[meeting.minutes.status] : null
 
-  async function handleRetranscribe() {
+  async function handleRetranscribe(style: 'detailed' | 'concise') {
     setRetranscribing(true)
     try {
-      const res = await fetch(`/api/generate/${meeting.id}/retranscribe`, { method: 'POST' })
+      const res = await fetch(`/api/generate/${meeting.id}/retranscribe`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ style }),
+      })
       if (res.ok) {
         toast.success('Compte rendu mis à jour avec la transcription')
         window.location.reload()
@@ -66,16 +70,29 @@ export function MeetingCard({ meeting, onGenerate, generating }: MeetingCardProp
           </span>
         </div>
       </div>
+
       <div className="flex flex-col items-end gap-2 shrink-0">
         {status && <Badge variant={status.variant}>{status.label}</Badge>}
+
         {!meeting.minutes ? (
-          <button
-            onClick={() => onGenerate(meeting.id)}
-            disabled={generating}
-            className="text-sm text-blue-600 hover:underline disabled:opacity-50"
-          >
-            {generating ? 'Génération…' : 'Créer le compte rendu'}
-          </button>
+          <div className="flex flex-col items-end gap-1">
+            <button
+              onClick={() => onGenerate(meeting.id, 'detailed')}
+              disabled={generating}
+              className="flex items-center gap-1.5 text-sm text-blue-600 hover:underline disabled:opacity-50"
+            >
+              <FileText size={13} />
+              {generating ? 'Génération…' : 'Compte rendu développé'}
+            </button>
+            <button
+              onClick={() => onGenerate(meeting.id, 'concise')}
+              disabled={generating}
+              className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-blue-600 hover:underline disabled:opacity-50"
+            >
+              <AlignLeft size={13} />
+              {generating ? 'Génération…' : 'Compte rendu synthétique'}
+            </button>
+          </div>
         ) : (
           <a
             href={`/comptes-rendus/${meeting.minutes.id}`}
@@ -84,15 +101,26 @@ export function MeetingCard({ meeting, onGenerate, generating }: MeetingCardProp
             Ouvrir
           </a>
         )}
+
         {meeting.minutes && (
-          <button
-            onClick={handleRetranscribe}
-            disabled={retranscribing}
-            className="flex items-center gap-1 text-xs text-gray-500 hover:text-blue-600 disabled:opacity-50"
-          >
-            <RefreshCw size={11} className={retranscribing ? 'animate-spin' : ''} />
-            {retranscribing ? 'Récupération…' : 'Actualiser avec transcription'}
-          </button>
+          <div className="flex flex-col items-end gap-1">
+            <button
+              onClick={() => handleRetranscribe('detailed')}
+              disabled={retranscribing}
+              className="flex items-center gap-1 text-xs text-gray-400 hover:text-blue-600 disabled:opacity-50"
+            >
+              <RefreshCw size={11} className={retranscribing ? 'animate-spin' : ''} />
+              Actualiser — développé
+            </button>
+            <button
+              onClick={() => handleRetranscribe('concise')}
+              disabled={retranscribing}
+              className="flex items-center gap-1 text-xs text-gray-400 hover:text-blue-600 disabled:opacity-50"
+            >
+              <RefreshCw size={11} />
+              Actualiser — synthétique
+            </button>
+          </div>
         )}
       </div>
     </div>

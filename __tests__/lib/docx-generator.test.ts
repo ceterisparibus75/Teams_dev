@@ -3,7 +3,7 @@ import { buildDocxFilename, buildActionRows } from '@/lib/docx-generator'
 describe('buildDocxFilename', () => {
   it('génère un nom de fichier normalisé', () => {
     const name = buildDocxFilename('Réunion créanciers', new Date('2026-04-22T10:00:00'))
-    expect(name).toMatch(/^CR_22042026_/)
+    expect(name).toMatch(/^PV_22042026_/)
     expect(name).toMatch(/\.docx$/)
   })
 })

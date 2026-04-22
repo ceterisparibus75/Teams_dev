@@ -7,7 +7,6 @@ export interface TemplateSection {
 
 export interface MinutesContent {
   summary: string
-  decisions: string[]
   actions: Array<{ description: string; responsable: string; echeance: string }>
   notes: string
   [key: string]: unknown

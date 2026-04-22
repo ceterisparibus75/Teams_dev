@@ -32,10 +32,14 @@ export default function ReunionsPage() {
       })
   }, [])
 
-  async function handleGenerate(meetingId: string) {
+  async function handleGenerate(meetingId: string, style: 'detailed' | 'concise') {
     setGenerating(meetingId)
     try {
-      const res = await fetch(`/api/generate/${meetingId}`, { method: 'POST' })
+      const res = await fetch(`/api/generate/${meetingId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ style }),
+      })
       if (!res.ok) { toast.error('Erreur lors de la génération'); return }
       const data = await res.json()
       toast.success('Compte rendu généré')
@@ -67,7 +71,7 @@ export default function ReunionsPage() {
           <MeetingCard
             key={m.id}
             meeting={m}
-            onGenerate={handleGenerate}
+            onGenerate={(id, style) => handleGenerate(id, style)}
             generating={generating === m.id}
           />
         ))

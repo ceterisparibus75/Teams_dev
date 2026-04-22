@@ -2,17 +2,19 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
-import { generateMinutesContent } from '@/lib/azure-openai'
+import { generateMinutesContent, type GenerationStyle } from '@/lib/azure-openai'
 import { getTranscription } from '@/lib/microsoft-graph'
 
 export async function POST(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ meetingId: string }> }
 ) {
   const session = await getServerSession(authOptions)
   if (!session?.user?.id) return NextResponse.json({ error: 'Non autorisé' }, { status: 401 })
 
   const { meetingId } = await params
+  const body = await req.json().catch(() => ({}))
+  const style: GenerationStyle = body.style === 'concise' ? 'concise' : 'detailed'
 
   const meeting = await prisma.meeting.findFirst({
     where: {
@@ -42,7 +44,7 @@ export async function POST(
     )
   }
 
-  const content = await generateMinutesContent(meeting.subject, transcript)
+  const content = await generateMinutesContent(meeting.subject, transcript, style)
 
   await prisma.meetingMinutes.update({
     where: { meetingId },

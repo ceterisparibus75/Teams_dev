@@ -10,10 +10,9 @@ import { formatDateTime } from '@/lib/utils'
 import type { MinutesContent, TemplateSection } from '@/types'
 
 const DEFAULT_SECTIONS: TemplateSection[] = [
-  { id: 'summary',   label: 'Résumé',               type: 'text',  aiGenerated: true  },
-  { id: 'decisions', label: 'Décisions',             type: 'list',  aiGenerated: true  },
-  { id: 'actions',   label: 'Actions à suivre',      type: 'table', aiGenerated: true  },
-  { id: 'notes',     label: 'Notes complémentaires', type: 'text',  aiGenerated: false },
+  { id: 'summary', label: 'Résumé',               type: 'text',  aiGenerated: true  },
+  { id: 'actions', label: 'Actions à suivre',      type: 'table', aiGenerated: true  },
+  { id: 'notes',   label: 'Notes complémentaires', type: 'text',  aiGenerated: false },
 ]
 
 const statusConfig: Record<string, { label: string; variant: 'default' | 'warning' | 'success' }> = {

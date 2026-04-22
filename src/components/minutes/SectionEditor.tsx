@@ -11,84 +11,68 @@ interface Props {
 export function SectionEditor({ section, content, onChange }: Props) {
   if (section.id === 'summary' || section.id === 'notes' || section.type === 'text') {
     const value = typeof content[section.id] === 'string' ? (content[section.id] as string) : ''
+    const rows = section.id === 'summary' ? 14 : 8
     return (
       <textarea
         value={value}
         onChange={(e) => onChange({ ...content, [section.id]: e.target.value })}
-        rows={4}
-        className="w-full border border-gray-200 rounded-lg p-3 text-sm text-gray-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 resize-none"
+        rows={rows}
+        className="w-full border border-gray-200 rounded-lg p-4 text-sm text-gray-700 leading-relaxed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 resize-y"
         placeholder={`Saisir ${section.label.toLowerCase()}…`}
       />
-    )
-  }
-
-  if (section.id === 'decisions' || section.type === 'list') {
-    const decisions: string[] = Array.isArray(content.decisions) ? content.decisions : []
-    return (
-      <div className="space-y-2">
-        {decisions.map((d, i) => (
-          <div key={i} className="flex gap-2">
-            <input
-              value={d}
-              onChange={(e) => {
-                const next = [...decisions]
-                next[i] = e.target.value
-                onChange({ ...content, decisions: next })
-              }}
-              className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
-              placeholder="Décision…"
-            />
-            <button
-              onClick={() => onChange({ ...content, decisions: decisions.filter((_, j) => j !== i) })}
-              className="text-gray-400 hover:text-red-500"
-              aria-label="Supprimer"
-            >
-              <Trash2 size={16} />
-            </button>
-          </div>
-        ))}
-        <button
-          onClick={() => onChange({ ...content, decisions: [...decisions, ''] })}
-          className="flex items-center gap-1 text-sm text-blue-600 hover:underline"
-        >
-          <Plus size={14} /> Ajouter une décision
-        </button>
-      </div>
     )
   }
 
   if (section.id === 'actions' || section.type === 'table') {
     const actions = Array.isArray(content.actions) ? content.actions : []
     return (
-      <div className="space-y-2">
+      <div className="space-y-3">
         {actions.length > 0 && (
-          <div className="grid grid-cols-3 gap-2 text-xs font-semibold uppercase tracking-wider text-gray-400 px-1">
+          <div className="grid grid-cols-[1fr_160px_140px_32px] gap-2 text-xs font-semibold uppercase tracking-wider text-gray-400 px-1">
             <span>Description</span>
             <span>Responsable</span>
             <span>Échéance</span>
+            <span />
           </div>
         )}
         {actions.map((a, i) => (
-          <div key={i} className="grid grid-cols-3 gap-2 items-center">
-            {(['description', 'responsable', 'echeance'] as const).map((field) => (
-              <input
-                key={field}
-                value={a[field]}
-                type={field === 'echeance' ? 'date' : 'text'}
-                onChange={(e) => {
-                  const next = [...actions]
-                  next[i] = { ...next[i], [field]: e.target.value }
-                  onChange({ ...content, actions: next })
-                }}
-                className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
-              />
-            ))}
+          <div key={i} className="grid grid-cols-[1fr_160px_140px_32px] gap-2 items-center">
+            <input
+              value={a.description}
+              onChange={(e) => {
+                const next = [...actions]
+                next[i] = { ...next[i], description: e.target.value }
+                onChange({ ...content, actions: next })
+              }}
+              className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+              placeholder="Action à réaliser…"
+            />
+            <input
+              value={a.responsable}
+              onChange={(e) => {
+                const next = [...actions]
+                next[i] = { ...next[i], responsable: e.target.value }
+                onChange({ ...content, actions: next })
+              }}
+              className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+              placeholder="Responsable…"
+            />
+            <input
+              value={a.echeance}
+              type="date"
+              onChange={(e) => {
+                const next = [...actions]
+                next[i] = { ...next[i], echeance: e.target.value }
+                onChange({ ...content, actions: next })
+              }}
+              className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+            />
             <button
               onClick={() => onChange({ ...content, actions: actions.filter((_, j) => j !== i) })}
-              className="text-gray-400 hover:text-red-500 col-span-1 flex justify-end"
+              className="text-gray-300 hover:text-red-500 flex items-center justify-center"
               aria-label="Supprimer"
             >
-              <Trash2 size={16} />
+              <Trash2 size={15} />
             </button>
           </div>
         ))}
@@ -99,7 +83,7 @@ export function SectionEditor({ section, content, onChange }: Props) {
               actions: [...actions, { description: '', responsable: '', echeance: '' }],
             })
           }
-          className="flex items-center gap-1 text-sm text-blue-600 hover:underline"
+          className="flex items-center gap-1.5 text-sm text-blue-600 hover:underline mt-1"
         >
           <Plus size={14} /> Ajouter une action
         </button>

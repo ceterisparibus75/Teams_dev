@@ -3,16 +3,18 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { getTranscription } from '@/lib/microsoft-graph'
-import { generateMinutesContent } from '@/lib/azure-openai'
+import { generateMinutesContent, type GenerationStyle } from '@/lib/azure-openai'
 
 export async function POST(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ meetingId: string }> }
 ) {
   const session = await getServerSession(authOptions)
   if (!session?.user?.id) return NextResponse.json({ error: 'Non autorisé' }, { status: 401 })
 
   const { meetingId } = await params
+  const body = await req.json().catch(() => ({}))
+  const style: GenerationStyle = body.style === 'concise' ? 'concise' : 'detailed'
 
   const meeting = await prisma.meeting.findFirst({
     where: {
@@ -26,17 +28,20 @@ export async function POST(
   })
   if (!meeting) return NextResponse.json({ error: 'Réunion introuvable' }, { status: 404 })
 
-  const existingMinutes = await prisma.meetingMinutes.findUnique({
-    where: { meetingId },
-  })
-  if (existingMinutes) return NextResponse.json(existingMinutes)
+  // If a draft already exists, regenerate its content with the new style
+  const existingMinutes = await prisma.meetingMinutes.findUnique({ where: { meetingId } })
 
   const defaultTemplate = await prisma.template.findFirst({ where: { isDefault: true } })
-
-  // Transcription fetched in memory only — never persisted
   const transcription = await getTranscription(session.user.id, meeting.joinUrl)
+  const content = await generateMinutesContent(meeting.subject, transcription, style)
 
-  const content = await generateMinutesContent(meeting.subject, transcription)
+  if (existingMinutes) {
+    await prisma.meetingMinutes.update({
+      where: { meetingId },
+      data: { content: content as unknown as import('@prisma/client').Prisma.InputJsonValue },
+    })
+    return NextResponse.json({ ...existingMinutes, content })
+  }
 
   const minutes = await prisma.meetingMinutes.create({
     data: {
