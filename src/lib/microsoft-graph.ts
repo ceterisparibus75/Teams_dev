@@ -87,6 +87,11 @@ function mergeDebug(detail: string | undefined, debug: string | undefined): stri
   return [detail, debug].filter(Boolean).join(' | ') || undefined
 }
 
+function isForbiddenDetail(detail: string | undefined): boolean {
+  const lower = detail?.toLowerCase() ?? ''
+  return lower.includes('403') || lower.includes('forbidden')
+}
+
 function getErrorMessage(error: unknown): string | undefined {
   if (typeof error === 'string') return error
   if (!error || typeof error !== 'object') return undefined
@@ -396,6 +401,8 @@ export async function getTranscriptionResult(
 
   try {
     const escapedJoinUrl = escapeODataString(joinUrl)
+    const tokenClaims = decodeAccessTokenClaims(tokenResult.accessToken)
+    const tokenOid = tokenClaims?.oid
     const meetingLookup = new URLSearchParams({
       '$filter': `JoinWebUrl eq '${escapedJoinUrl}'`,
     })
@@ -409,9 +416,48 @@ export async function getTranscriptionResult(
     const onlineMeetingId = lookup.value?.[0]?.id
     if (!onlineMeetingId) return { ok: false, reason: 'meeting_not_found' }
 
-    const transcripts = await graphGetJson<{
-      value?: Array<{ id?: string; createdDateTime?: string }>
-    }>(tokenResult.accessToken, `/me/onlineMeetings/${encodeURIComponent(onlineMeetingId)}/transcripts`)
+    const transcriptCandidates = [
+      {
+        label: 'me',
+        basePath: `/me/onlineMeetings/${encodeURIComponent(onlineMeetingId)}`,
+      },
+      ...(tokenOid
+        ? [
+            {
+              label: `users/${tokenOid}`,
+              basePath: `/users/${encodeURIComponent(tokenOid)}/onlineMeetings/${encodeURIComponent(onlineMeetingId)}`,
+            },
+          ]
+        : []),
+    ]
+
+    let transcripts:
+      | {
+          value?: Array<{ id?: string; createdDateTime?: string }>
+        }
+      | null = null
+    let transcriptBasePath: string | null = null
+    const transcriptErrors: string[] = []
+
+    for (const candidate of transcriptCandidates) {
+      try {
+        transcripts = await graphGetJson<{
+          value?: Array<{ id?: string; createdDateTime?: string }>
+        }>(tokenResult.accessToken, `${candidate.basePath}/transcripts`)
+        transcriptBasePath = candidate.basePath
+        break
+      } catch (error) {
+        transcriptErrors.push(`${candidate.label}: ${getErrorMessage(error) ?? 'Erreur inconnue'}`)
+      }
+    }
+
+    if (!transcripts) {
+      const detail = mergeDebug(transcriptErrors.join(' || '), tokenResult.debug)
+      if (transcriptErrors.some((entry) => isForbiddenDetail(entry))) {
+        return { ok: false, reason: 'permission_denied', detail }
+      }
+      return { ok: false, reason: 'graph_error', detail }
+    }
 
     if (!transcripts.value?.length) return { ok: false, reason: 'transcript_not_found' }
 
@@ -422,11 +468,51 @@ export async function getTranscriptionResult(
     const transcriptId = latestTranscript?.id
     if (!transcriptId) return { ok: false, reason: 'transcript_not_found' }
 
-    const content = await graphGetText(
-      tokenResult.accessToken,
-      `/me/onlineMeetings/${encodeURIComponent(onlineMeetingId)}/transcripts/${encodeURIComponent(transcriptId)}/content`,
-      new URLSearchParams({ '$format': 'text/vtt' })
-    )
+    let content: string | null = null
+    const contentErrors: string[] = []
+
+    for (const candidate of transcriptCandidates) {
+      if (transcriptBasePath && candidate.basePath !== transcriptBasePath && candidate.label !== 'me') {
+        // Prefer the path that successfully listed transcripts before trying alternates.
+        continue
+      }
+
+      try {
+        content = await graphGetText(
+          tokenResult.accessToken,
+          `${candidate.basePath}/transcripts/${encodeURIComponent(transcriptId)}/content`,
+          new URLSearchParams({ '$format': 'text/vtt' })
+        )
+        break
+      } catch (error) {
+        contentErrors.push(`${candidate.label}: ${getErrorMessage(error) ?? 'Erreur inconnue'}`)
+      }
+    }
+
+    if (!content && transcriptBasePath) {
+      for (const candidate of transcriptCandidates) {
+        if (`${candidate.basePath}` === transcriptBasePath) continue
+
+        try {
+          content = await graphGetText(
+            tokenResult.accessToken,
+            `${candidate.basePath}/transcripts/${encodeURIComponent(transcriptId)}/content`,
+            new URLSearchParams({ '$format': 'text/vtt' })
+          )
+          break
+        } catch (error) {
+          contentErrors.push(`${candidate.label}: ${getErrorMessage(error) ?? 'Erreur inconnue'}`)
+        }
+      }
+    }
+
+    if (!content) {
+      const detail = mergeDebug(contentErrors.join(' || '), tokenResult.debug)
+      if (contentErrors.some((entry) => isForbiddenDetail(entry))) {
+        return { ok: false, reason: 'permission_denied', detail }
+      }
+      return { ok: false, reason: 'graph_error', detail }
+    }
 
     if (typeof content !== 'string') {
       return { ok: false, reason: 'transcript_empty' }
