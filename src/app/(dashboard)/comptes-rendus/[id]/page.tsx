@@ -36,6 +36,12 @@ interface MinutesData {
   author: { name: string }
 }
 
+interface ApiErrorPayload {
+  error?: string
+  code?: string
+  detail?: string | null
+}
+
 export default function MinutesDetailPage() {
   const { id } = useParams<{ id: string }>()
   const router = useRouter()
@@ -84,8 +90,10 @@ export default function MinutesDetailPage() {
         body: JSON.stringify({ style }),
       })
       if (!res.ok) {
-        const err = await res.json()
-        toast.error(err.error ?? 'Erreur lors de la régénération')
+        const err = (await res.json()) as ApiErrorPayload
+        toast.error(err.error ?? 'Erreur lors de la régénération', {
+          description: [err.code, err.detail].filter(Boolean).join(' - ') || undefined,
+        })
         return
       }
       toast.success('Compte rendu régénéré')
