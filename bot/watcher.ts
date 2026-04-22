@@ -1,24 +1,25 @@
 /**
- * Watcher — surveille le calendrier Teams et récupère les transcriptions via Graph API.
+ * Watcher — surveille le calendrier Outlook et orchestre la génération de comptes rendus.
  *
- * Flux :
+ * Flux pour réunions Teams internes :
  *  1. syncCalendarMeetings : importe les réunions en ligne dans la DB toutes les 60 s
- *  2. processEndedMeetings : pour chaque réunion terminée (≥ 10 min après fin),
- *     récupère la transcription via Graph API et déclenche la génération du compte rendu
+ *  2. processEndedMeetings : 10 min après la fin, récupère la transcription Graph API → génère
  *
- * Permissions Azure AD requises (Application) :
- *   OnlineMeetings.Read.All        — lire les réunions en ligne
- *   OnlineMeetingTranscript.Read.All — lire les transcriptions
+ * Flux pour réunions externes (Teams externe, Zoom, Google Meet) :
+ *  1. syncCalendarMeetings : détecte la plateforme + extrait le lien depuis le corps de l'événement
+ *  2. scheduleAndRunBots   : 3 min avant le début, lance le bot navigateur Playwright
+ *  3. Le bot capture l'audio → transcrit via Whisper → génère le compte rendu
  */
 
 import { Client } from '@microsoft/microsoft-graph-client'
 import { ConfidentialClientApplication } from '@azure/msal-node'
+import type { MeetingPlatform } from '@prisma/client'
 import { prisma, triggerGeneration } from './index'
+import { joinMeeting } from './browser-bot'
 
-// IDs des réunions en cours de traitement (dédoublonnage intra-session)
 const processingMeetings = new Set<string>()
 
-// ─── Token applicatif (client credentials) ───────────────────────────────────
+// ─── Token applicatif (client credentials) ────────────────────────────────────
 
 async function getAppToken(): Promise<string | null> {
   const cca = new ConfidentialClientApplication({
@@ -39,7 +40,7 @@ async function getAppToken(): Promise<string | null> {
   }
 }
 
-// ─── Token délégué (pour sync calendrier) ────────────────────────────────────
+// ─── Token délégué ────────────────────────────────────────────────────────────
 
 async function getUserToken(userId: string): Promise<string | null> {
   const user = await prisma.user.findUnique({
@@ -94,7 +95,6 @@ async function getUserToken(userId: string): Promise<string | null> {
 function parseVttTranscript(vtt: string): string {
   const lines: string[] = []
   for (const block of vtt.split('\n\n')) {
-    // Format Teams VTT : <v Prénom Nom>Texte du bloc
     const match = block.match(/<v ([^>]+)>([\s\S]+)/)
     if (match) {
       const speaker = match[1].trim()
@@ -105,7 +105,7 @@ function parseVttTranscript(vtt: string): string {
   return lines.join('\n')
 }
 
-// ─── Récupération de la transcription via Graph API ───────────────────────────
+// ─── Transcription via Graph API (réunions Teams internes) ───────────────────
 
 async function fetchTranscript(
   organizerGuid: string,
@@ -113,14 +113,13 @@ async function fetchTranscript(
 ): Promise<string | null> {
   const token = await getAppToken()
   if (!token) {
-    console.warn('[bot] Token applicatif indisponible — vérifiez les permissions Azure AD')
+    console.warn('[bot] Token applicatif indisponible')
     return null
   }
 
   const client = Client.init({ authProvider: (done) => done(null, token) })
 
   try {
-    // 1. Récupérer l'ID de la réunion en ligne à partir du lien de participation
     const escaped = joinUrl.replace(/'/g, "''")
     const meetingsResult = await client
       .api(`/users/${organizerGuid}/onlineMeetings`)
@@ -128,22 +127,14 @@ async function fetchTranscript(
       .get()
 
     const onlineMeetingId = meetingsResult.value?.[0]?.id as string | undefined
-    if (!onlineMeetingId) {
-      console.log('[bot] Réunion en ligne introuvable via Graph API')
-      return null
-    }
+    if (!onlineMeetingId) return null
 
-    // 2. Lister les transcriptions disponibles
     const transcriptsResult = await client
       .api(`/users/${organizerGuid}/onlineMeetings/${onlineMeetingId}/transcripts`)
       .get()
 
-    if (!transcriptsResult.value?.length) {
-      console.log('[bot] Aucune transcription disponible (activer la transcription dans Teams)')
-      return null
-    }
+    if (!transcriptsResult.value?.length) return null
 
-    // 3. Télécharger le contenu VTT de la transcription la plus récente
     const transcriptId = transcriptsResult.value[0].id as string
     const vttContent = await fetch(
       `https://graph.microsoft.com/v1.0/users/${organizerGuid}/onlineMeetings/${onlineMeetingId}/transcripts/${transcriptId}/content`,
@@ -158,12 +149,49 @@ async function fetchTranscript(
     const parsed = parseVttTranscript(vttContent)
     if (!parsed) return null
 
-    console.log(`[bot] Transcription récupérée : ${parsed.split('\n').length} lignes`)
+    console.log(`[bot] Transcription Graph récupérée : ${parsed.split('\n').length} lignes`)
     return parsed
   } catch (err) {
     console.error('[bot] Erreur récupération transcription Graph:', err)
     return null
   }
+}
+
+// ─── Détection de la plateforme ───────────────────────────────────────────────
+
+function detectPlatform(joinUrl: string | undefined, bodyHtml: string): {
+  platform: MeetingPlatform
+  externalUrl: string | undefined
+} {
+  // Teams interne (même tenant)
+  if (joinUrl?.includes('teams.microsoft.com') || joinUrl?.includes('teams.live.com')) {
+    const tenantId = process.env.AZURE_AD_TENANT_ID ?? ''
+    const isInternal = tenantId && joinUrl.includes(tenantId)
+    return {
+      platform: isInternal ? 'TEAMS_INTERNAL' : 'TEAMS_EXTERNAL',
+      externalUrl: isInternal ? undefined : joinUrl,
+    }
+  }
+
+  // Zoom — le lien est dans le corps de l'invitation
+  const zoomMatch = bodyHtml.match(/https?:\/\/[\w.-]*zoom\.us\/j\/[\w?=&%-]+/)
+  if (zoomMatch) {
+    return { platform: 'ZOOM', externalUrl: zoomMatch[0] }
+  }
+
+  // Google Meet
+  const meetMatch = bodyHtml.match(/https?:\/\/meet\.google\.com\/[a-z]{3}-[a-z]{4}-[a-z]{3}/)
+  if (meetMatch) {
+    return { platform: 'GOOGLE_MEET', externalUrl: meetMatch[0] }
+  }
+
+  // Autres liens de visio dans le corps
+  const genericMatch = bodyHtml.match(/https?:\/\/[\w.-]+\/(j\/|join\/|meeting\/)[^\s"<]+/)
+  if (genericMatch) {
+    return { platform: 'OTHER', externalUrl: genericMatch[0] }
+  }
+
+  return { platform: 'TEAMS_INTERNAL', externalUrl: undefined }
 }
 
 // ─── Synchronisation du calendrier → DB ──────────────────────────────────────
@@ -175,11 +203,15 @@ interface CalendarEvent {
   end: { dateTime: string }
   isOnlineMeeting: boolean
   onlineMeeting?: { joinUrl?: string }
+  body?: { content: string; contentType: string }
 }
 
 function toUtc(dt: string): Date {
   return new Date(dt.endsWith('Z') ? dt : dt + 'Z')
 }
+
+// 3 minutes d'avance pour que le bot soit prêt avant le début
+const BOT_LEAD_TIME_MS = 3 * 60 * 1000
 
 async function syncCalendarMeetings(): Promise<void> {
   const users = await prisma.user.findMany({
@@ -188,7 +220,7 @@ async function syncCalendarMeetings(): Promise<void> {
   })
 
   const now = new Date()
-  const windowStart = new Date(now.getTime() - 24 * 60 * 60 * 1000) // 24 h en arrière
+  const windowStart = new Date(now.getTime() - 24 * 60 * 60 * 1000)
   const windowEnd = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000)
 
   for (const user of users) {
@@ -200,23 +232,46 @@ async function syncCalendarMeetings(): Promise<void> {
       const result = await client
         .api('/me/calendarView')
         .query({ startDateTime: windowStart.toISOString(), endDateTime: windowEnd.toISOString() })
-        .select('id,subject,start,end,isOnlineMeeting,onlineMeeting')
+        // Fetch body to detect Zoom/Meet links
+        .select('id,subject,start,end,isOnlineMeeting,onlineMeeting,body')
         .top(50)
         .get()
 
       for (const ev of (result.value ?? []) as CalendarEvent[]) {
-        if (!ev.isOnlineMeeting || !ev.onlineMeeting?.joinUrl) continue
+        const bodyHtml = ev.body?.content ?? ''
+        const joinUrl = ev.onlineMeeting?.joinUrl
+
+        // Skip events with no meeting link at all
+        if (!joinUrl && !bodyHtml.includes('zoom.us') && !bodyHtml.includes('meet.google.com')) {
+          continue
+        }
+
+        const { platform, externalUrl } = detectPlatform(joinUrl, bodyHtml)
+        const startTime = toUtc(ev.start.dateTime)
+        const botScheduledAt = new Date(startTime.getTime() - BOT_LEAD_TIME_MS)
 
         await prisma.meeting.upsert({
           where: { id: ev.id },
-          update: {},
+          // On future updates, preserve botStatus already set (avoid resetting an in-progress bot)
+          update: {
+            subject: ev.subject,
+            startDateTime: startTime,
+            endDateTime: toUtc(ev.end.dateTime),
+            platform,
+            externalUrl: externalUrl ?? null,
+          },
           create: {
             id: ev.id,
             subject: ev.subject,
-            startDateTime: toUtc(ev.start.dateTime),
+            startDateTime: startTime,
             endDateTime: toUtc(ev.end.dateTime),
             organizerId: user.id,
-            joinUrl: ev.onlineMeeting.joinUrl,
+            joinUrl: joinUrl ?? null,
+            platform,
+            externalUrl: externalUrl ?? null,
+            // Only schedule bot for external meetings
+            botStatus: platform === 'TEAMS_INTERNAL' ? null : 'SCHEDULED',
+            botScheduledAt: platform === 'TEAMS_INTERNAL' ? null : botScheduledAt,
           },
         })
       }
@@ -226,15 +281,66 @@ async function syncCalendarMeetings(): Promise<void> {
   }
 }
 
-// ─── Traitement des réunions terminées ────────────────────────────────────────
+// ─── Lancement des bots planifiés ────────────────────────────────────────────
+
+async function scheduleAndRunBots(): Promise<void> {
+  const now = new Date()
+
+  const pendingMeetings = await prisma.meeting.findMany({
+    where: {
+      botStatus: 'SCHEDULED',
+      botScheduledAt: { lte: now },
+      // Don't retry meetings that already ended more than 30 min ago
+      endDateTime: { gte: new Date(now.getTime() - 30 * 60 * 1000) },
+      platform: { not: 'TEAMS_INTERNAL' },
+    },
+    include: { organizer: { select: { id: true } } },
+  })
+
+  for (const meeting of pendingMeetings) {
+    if (processingMeetings.has(meeting.id)) continue
+    processingMeetings.add(meeting.id)
+
+    const meetingUrl = meeting.externalUrl ?? meeting.joinUrl
+    if (!meetingUrl) {
+      await prisma.meeting.update({
+        where: { id: meeting.id },
+        data: { botStatus: 'FAILED' },
+      })
+      processingMeetings.delete(meeting.id)
+      continue
+    }
+
+    console.log(`[bot] Lancement bot pour "${meeting.subject}" (${meeting.platform}) — ${meetingUrl}`)
+
+    // Run in background — joinMeeting handles its own status updates and generation trigger
+    joinMeeting({
+      id: meeting.id,
+      subject: meeting.subject,
+      platform: meeting.platform,
+      url: meetingUrl,
+      endDateTime: meeting.endDateTime,
+    }).catch((err) => {
+      console.error(`[bot] Erreur joinMeeting pour ${meeting.id}:`, err)
+      prisma.meeting.update({
+        where: { id: meeting.id },
+        data: { botStatus: 'FAILED' },
+      }).catch(() => {})
+    }).finally(() => {
+      processingMeetings.delete(meeting.id)
+    })
+  }
+}
+
+// ─── Traitement des réunions Teams internes terminées ────────────────────────
 
 async function processEndedMeetings(): Promise<void> {
   const now = new Date()
-  // Attendre 10 minutes après la fin pour que la transcription soit disponible
   const cutoff = new Date(now.getTime() - 10 * 60 * 1000)
 
   const meetings = await prisma.meeting.findMany({
     where: {
+      platform: 'TEAMS_INTERNAL',
       endDateTime: { lte: cutoff },
       processedAt: null,
       joinUrl: { not: null },
@@ -248,7 +354,13 @@ async function processEndedMeetings(): Promise<void> {
     if (processingMeetings.has(meeting.id)) continue
     processingMeetings.add(meeting.id)
 
-    console.log(`[bot] Réunion terminée : "${meeting.subject}" — récupération transcription…`)
+    // Mark as processed immediately to prevent infinite retry loops if triggerGeneration fails
+    await prisma.meeting.update({
+      where: { id: meeting.id },
+      data: { processedAt: new Date() },
+    }).catch(() => {})
+
+    console.log(`[bot] Réunion Teams terminée : "${meeting.subject}" — récupération transcription…`)
 
     const transcript =
       meeting.organizer.microsoftId && meeting.joinUrl
@@ -256,6 +368,7 @@ async function processEndedMeetings(): Promise<void> {
         : null
 
     await triggerGeneration(meeting.id, transcript)
+    processingMeetings.delete(meeting.id)
   }
 }
 
@@ -266,9 +379,16 @@ export function startWatcher(): void {
 
   async function tick() {
     await syncCalendarMeetings()
+    await scheduleAndRunBots()
     await processEndedMeetings()
   }
 
-  tick()
-  setInterval(tick, 60_000)
+  // Recursive setTimeout instead of setInterval to avoid concurrent ticks
+  // if a tick takes longer than 60 seconds (slow Graph API, many users, etc.)
+  async function scheduleTick() {
+    await tick().catch((err) => console.error('[bot] Erreur tick watcher:', err))
+    setTimeout(scheduleTick, 60_000)
+  }
+
+  scheduleTick()
 }

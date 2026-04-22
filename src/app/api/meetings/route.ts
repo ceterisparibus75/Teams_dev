@@ -55,8 +55,16 @@ export async function GET() {
           { collaborators: { some: { userId: session.user.id } } },
         ],
       },
-      include: {
-        participants: true,
+      select: {
+        id: true,
+        subject: true,
+        startDateTime: true,
+        endDateTime: true,
+        hasTranscription: true,
+        platform: true,
+        botStatus: true,
+        botScheduledAt: true,
+        participants: { select: { name: true, email: true } },
         minutes: { select: { id: true, status: true } },
       },
       orderBy: { startDateTime: 'desc' },

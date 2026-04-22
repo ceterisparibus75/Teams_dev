@@ -36,6 +36,10 @@ model Meeting {
   processedAt      DateTime?
   minutes          MeetingMinutes?
   createdAt        DateTime              @default(now())
+  platform         MeetingPlatform       @default(TEAMS_INTERNAL)
+  externalUrl      String?
+  botStatus        BotStatus?
+  botScheduledAt   DateTime?
 }
 
 model MeetingParticipant {
@@ -85,4 +89,21 @@ enum MinutesStatus {
   DRAFT
   REVIEWED
   SENT
+}
+
+enum MeetingPlatform {
+  TEAMS_INTERNAL
+  TEAMS_EXTERNAL
+  ZOOM
+  GOOGLE_MEET
+  OTHER
+}
+
+enum BotStatus {
+  SCHEDULED
+  JOINING
+  IN_MEETING
+  PROCESSING
+  DONE
+  FAILED
 }
