@@ -2,6 +2,7 @@ import { Client } from '@microsoft/microsoft-graph-client'
 import { ConfidentialClientApplication } from '@azure/msal-node'
 import { prisma } from '@/lib/prisma'
 import { MICROSOFT_GRAPH_SCOPES } from '@/lib/microsoft-scopes'
+import { transcribeMedia } from '@/lib/openai-transcription'
 import type { GraphMeeting } from '@/types'
 
 type AccessTokenResult =
@@ -35,12 +36,14 @@ interface TranscriptionLookupOptions {
 interface DriveItemLike {
   id?: string
   name?: string
+  size?: number
   webUrl?: string
   parentReference?: { driveId?: string; path?: string }
   file?: { mimeType?: string }
   remoteItem?: {
     id?: string
     name?: string
+    size?: number
     webUrl?: string
     parentReference?: { driveId?: string; path?: string }
     file?: { mimeType?: string }
@@ -302,6 +305,26 @@ async function graphGetText(accessToken: string, path: string, query?: URLSearch
   return payloadText
 }
 
+async function graphGetBuffer(accessToken: string, path: string, query?: URLSearchParams): Promise<Buffer> {
+  const url = new URL(`https://graph.microsoft.com/v1.0${path}`)
+  if (query) url.search = query.toString()
+
+  const response = await fetch(url, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      Accept: 'application/octet-stream',
+    },
+  })
+
+  if (!response.ok) {
+    const payloadText = await response.text()
+    throw new Error(buildGraphErrorDetail(response.status, payloadText))
+  }
+
+  const arrayBuffer = await response.arrayBuffer()
+  return Buffer.from(arrayBuffer)
+}
+
 async function graphPostJson<T>(
   accessToken: string,
   path: string,
@@ -336,13 +359,23 @@ function simplifyQueryTerm(value: string): string {
     .trim()
 }
 
-function extractDriveReference(item: DriveItemLike): { driveId?: string; itemId?: string; name?: string; webUrl?: string; path?: string } {
+function extractDriveReference(item: DriveItemLike): {
+  driveId?: string
+  itemId?: string
+  name?: string
+  size?: number
+  mimeType?: string
+  webUrl?: string
+  path?: string
+} {
   const remote = item.remoteItem
 
   return {
     driveId: remote?.parentReference?.driveId ?? item.parentReference?.driveId,
     itemId: remote?.id ?? item.id,
     name: remote?.name ?? item.name,
+    size: remote?.size ?? item.size,
+    mimeType: remote?.file?.mimeType ?? item.file?.mimeType,
     webUrl: remote?.webUrl ?? item.webUrl,
     path: remote?.parentReference?.path ?? item.parentReference?.path,
   }
@@ -401,10 +434,11 @@ function parseTranscriptText(content: string): string | null {
   return lines.join('\n') || null
 }
 
-async function searchTranscriptFile(
+async function searchDriveItems(
   accessToken: string,
-  subject: string
-): Promise<{ transcription: string; detail: string } | null> {
+  subject: string,
+  fileTypes: string[]
+): Promise<DriveItemLike[]> {
   const searchQueries = Array.from(
     new Set(
       [
@@ -417,6 +451,8 @@ async function searchTranscriptFile(
       ].filter(Boolean)
     )
   )
+
+  const items: DriveItemLike[] = []
 
   for (const queryText of searchQueries) {
     const results = await graphPostJson<{
@@ -432,7 +468,7 @@ async function searchTranscriptFile(
         {
           entityTypes: ['driveItem'],
           query: {
-            queryString: `"${queryText}" AND (filetype:vtt OR filetype:docx)`,
+            queryString: `"${queryText}" AND (${fileTypes.map((type) => `filetype:${type}`).join(' OR ')})`,
           },
           from: 0,
           size: 25,
@@ -448,24 +484,70 @@ async function searchTranscriptFile(
       .filter((item) => {
         const ref = extractDriveReference(item)
         const name = (ref.name ?? '').toLowerCase()
-        return name.endsWith('.vtt') || name.endsWith('.docx')
+        return fileTypes.some((type) => name.endsWith(`.${type}`))
       })
-      .sort((a, b) => scoreTranscriptCandidate(b, subject) - scoreTranscriptCandidate(a, subject))
 
-    for (const candidate of candidates) {
-      const ref = extractDriveReference(candidate)
-      if (!ref.driveId || !ref.itemId || !ref.name?.toLowerCase().endsWith('.vtt')) continue
+    items.push(...candidates)
+  }
 
-      const content = await graphGetText(
-        accessToken,
-        `/drives/${encodeURIComponent(ref.driveId)}/items/${encodeURIComponent(ref.itemId)}/content`
-      )
-      const parsed = parseTranscriptText(content)
-      if (parsed) {
-        return {
-          transcription: parsed,
-          detail: `Fallback fichier: ${ref.name}${ref.webUrl ? ` (${ref.webUrl})` : ''}`,
-        }
+  return items.sort((a, b) => scoreTranscriptCandidate(b, subject) - scoreTranscriptCandidate(a, subject))
+}
+
+async function searchTranscriptFile(
+  accessToken: string,
+  subject: string
+): Promise<{ transcription: string; detail: string } | null> {
+  const candidates = await searchDriveItems(accessToken, subject, ['vtt', 'docx'])
+
+  for (const candidate of candidates) {
+    const ref = extractDriveReference(candidate)
+    if (!ref.driveId || !ref.itemId || !ref.name?.toLowerCase().endsWith('.vtt')) continue
+
+    const content = await graphGetText(
+      accessToken,
+      `/drives/${encodeURIComponent(ref.driveId)}/items/${encodeURIComponent(ref.itemId)}/content`
+    )
+    const parsed = parseTranscriptText(content)
+    if (parsed) {
+      return {
+        transcription: parsed,
+        detail: `Fallback fichier transcript: ${ref.name}${ref.webUrl ? ` (${ref.webUrl})` : ''}`,
+      }
+    }
+  }
+
+  return null
+}
+
+async function searchRecordingFile(
+  accessToken: string,
+  subject: string
+): Promise<{ transcription: string; detail: string } | null> {
+  const candidates = await searchDriveItems(accessToken, subject, ['mp4'])
+
+  for (const candidate of candidates) {
+    const ref = extractDriveReference(candidate)
+    const name = ref.name ?? ''
+    const size = ref.size ?? 0
+
+    if (!ref.driveId || !ref.itemId || !name.toLowerCase().endsWith('.mp4')) continue
+    if (size > 25 * 1024 * 1024) continue
+
+    const buffer = await graphGetBuffer(
+      accessToken,
+      `/drives/${encodeURIComponent(ref.driveId)}/items/${encodeURIComponent(ref.itemId)}/content`
+    )
+
+    const transcription = await transcribeMedia({
+      buffer,
+      filename: name,
+      contentType: ref.mimeType ?? 'video/mp4',
+    })
+
+    if (transcription) {
+      return {
+        transcription,
+        detail: `Fallback enregistrement: ${name}${ref.webUrl ? ` (${ref.webUrl})` : ''}`,
       }
     }
   }
@@ -585,13 +667,15 @@ export async function getTranscriptionResult(
 
   const tokenResult = await getAccessTokenResult(userId)
   if (!tokenResult.ok) {
-    if (tokenResult.reason === 'missing_connection') {
+    const failedTokenResult = tokenResult
+
+    if (failedTokenResult.reason === 'missing_connection') {
       return { ok: false, reason: 'missing_connection' }
     }
-    if (tokenResult.reason === 'reauth_required') {
-      return { ok: false, reason: 'reauth_required', detail: tokenResult.detail }
+    if (failedTokenResult.reason === 'reauth_required') {
+      return { ok: false, reason: 'reauth_required', detail: failedTokenResult.detail }
     }
-    return { ok: false, reason: 'graph_error', detail: tokenResult.detail }
+    return { ok: false, reason: 'graph_error', detail: failedTokenResult.detail }
   }
 
   if (!tokenHasTranscriptScope(tokenResult.accessToken)) {
@@ -622,12 +706,22 @@ export async function getTranscriptionResult(
 
     try {
       const transcriptFile = await searchTranscriptFile(tokenResult.accessToken, subject)
-      if (!transcriptFile) return null
-
-      return {
-        ok: true,
-        transcription: transcriptFile.transcription,
+      if (transcriptFile) {
+        return {
+          ok: true,
+          transcription: transcriptFile.transcription,
+        }
       }
+
+      const recordingFile = await searchRecordingFile(tokenResult.accessToken, subject)
+      if (recordingFile) {
+        return {
+          ok: true,
+          transcription: recordingFile.transcription,
+        }
+      }
+
+      return null
     } catch (error) {
       return {
         ok: false,
