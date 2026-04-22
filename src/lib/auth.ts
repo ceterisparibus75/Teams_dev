@@ -1,0 +1,63 @@
+import { NextAuthOptions } from 'next-auth'
+import AzureADProvider from 'next-auth/providers/azure-ad'
+import { prisma } from '@/lib/prisma'
+
+export const authOptions: NextAuthOptions = {
+  providers: [
+    AzureADProvider({
+      clientId: process.env.AZURE_AD_CLIENT_ID!,
+      clientSecret: process.env.AZURE_AD_CLIENT_SECRET!,
+      tenantId: process.env.AZURE_AD_TENANT_ID!,
+      authorization: {
+        params: {
+          scope: 'openid profile email offline_access User.Read OnlineMeetings.Read Calendars.Read Mail.Send',
+        },
+      },
+    }),
+  ],
+  session: { strategy: 'jwt' },
+  callbacks: {
+    async jwt({ token, account }) {
+      if (account) {
+        token.microsoftId = account.providerAccountId
+        token.accessToken = account.access_token
+        token.refreshToken = account.refresh_token
+        token.accessTokenExpires = account.expires_at
+
+        await prisma.user.upsert({
+          where: { email: token.email! },
+          update: {
+            name: token.name ?? '',
+            microsoftId: account.providerAccountId,
+            microsoftAccessToken: account.access_token ?? null,
+            microsoftRefreshToken: account.refresh_token ?? null,
+            microsoftTokenExpiry: account.expires_at
+              ? new Date(account.expires_at * 1000)
+              : null,
+          },
+          create: {
+            email: token.email!,
+            name: token.name ?? '',
+            microsoftId: account.providerAccountId,
+            microsoftAccessToken: account.access_token ?? null,
+            microsoftRefreshToken: account.refresh_token ?? null,
+            microsoftTokenExpiry: account.expires_at
+              ? new Date(account.expires_at * 1000)
+              : null,
+          },
+        })
+      }
+      return token
+    },
+    async session({ session, token }) {
+      const user = await prisma.user.findUnique({
+        where: { email: session.user.email! },
+        select: { id: true },
+      })
+      if (user) session.user.id = user.id
+      session.accessToken = token.accessToken as string | undefined
+      return session
+    },
+  },
+  pages: { signIn: '/signin' },
+}
