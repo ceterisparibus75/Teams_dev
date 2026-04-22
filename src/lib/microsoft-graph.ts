@@ -270,7 +270,6 @@ export async function getTranscriptionResult(
     const lookup = await client
       .api('/me/onlineMeetings')
       .filter(`JoinWebUrl eq '${escapedJoinUrl}'`)
-      .select('id')
       .get()
     const onlineMeetingId = lookup.value?.[0]?.id
     if (!onlineMeetingId) return { ok: false, reason: 'meeting_not_found' }
