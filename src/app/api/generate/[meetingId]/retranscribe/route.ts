@@ -49,10 +49,15 @@ async function fetchTranscriptForMeeting(
       return { transcript: null, error: `Erreur recherche réunion : ${msg}` }
     }
 
-    const onlineMeetingId = meetingsResult.value?.[0]?.id
+    const onlineMeeting = meetingsResult.value?.[0] as { id: string; organizer?: { upn?: string; identity?: { user?: { displayName?: string } } } } | undefined
+    const onlineMeetingId = onlineMeeting?.id
     if (!onlineMeetingId) {
       return { transcript: null, error: `Réunion introuvable pour ce lien (joinWebUrl filter). joinUrl = ${joinUrl.substring(0, 80)}…` }
     }
+
+    // Log organizer to detect cross-tenant meetings
+    const meetingOrganizerUpn = onlineMeeting?.organizer?.upn ?? 'inconnu'
+    console.log(`[retranscribe] online meeting organizer UPN: ${meetingOrganizerUpn}, our guid: ${organizerGuid}`)
 
     // Étape 2 : lister les transcriptions
     let transcriptsResult: { value?: Array<{ id: string }> }
@@ -61,8 +66,13 @@ async function fetchTranscriptForMeeting(
         .api(`/users/${organizerGuid}/onlineMeetings/${onlineMeetingId}/transcripts`)
         .get()
     } catch (e) {
-      const msg = (e as Error).message ?? String(e)
-      return { transcript: null, error: `Erreur récupération transcriptions : ${msg}` }
+      // Extract detailed Graph error info
+      const graphErr = e as Record<string, unknown>
+      const body = graphErr?.body ? JSON.parse(graphErr.body as string) : null
+      const code = body?.error?.code ?? graphErr?.code ?? 'unknown'
+      const detail = body?.error?.message ?? (e as Error).message ?? String(e)
+      console.error('[retranscribe] transcripts error:', JSON.stringify({ code, detail, organizerGuid, onlineMeetingId, meetingOrganizerUpn }))
+      return { transcript: null, error: `Erreur récupération transcriptions : ${code} — ${detail} (organisateur réunion: ${meetingOrganizerUpn})` }
     }
 
     if (!transcriptsResult.value?.length) {
