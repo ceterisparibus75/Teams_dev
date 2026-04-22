@@ -27,28 +27,32 @@ export const authOptions: NextAuthOptions = {
         token.refreshToken = account.refresh_token
         token.accessTokenExpires = account.expires_at
 
-        await prisma.user.upsert({
-          where: { email: token.email! },
-          update: {
-            name: token.name ?? '',
-            microsoftId: oid,
-            microsoftAccessToken: account.access_token ?? null,
-            microsoftRefreshToken: account.refresh_token ?? null,
-            microsoftTokenExpiry: account.expires_at
-              ? new Date(account.expires_at * 1000)
-              : null,
-          },
-          create: {
-            email: token.email!,
-            name: token.name ?? '',
-            microsoftId: oid,
-            microsoftAccessToken: account.access_token ?? null,
-            microsoftRefreshToken: account.refresh_token ?? null,
-            microsoftTokenExpiry: account.expires_at
-              ? new Date(account.expires_at * 1000)
-              : null,
-          },
-        })
+        try {
+          await prisma.user.upsert({
+            where: { email: token.email! },
+            update: {
+              name: token.name ?? '',
+              microsoftId: oid,
+              microsoftAccessToken: account.access_token ?? null,
+              microsoftRefreshToken: account.refresh_token ?? null,
+              microsoftTokenExpiry: account.expires_at
+                ? new Date(account.expires_at * 1000)
+                : null,
+            },
+            create: {
+              email: token.email!,
+              name: token.name ?? '',
+              microsoftId: oid,
+              microsoftAccessToken: account.access_token ?? null,
+              microsoftRefreshToken: account.refresh_token ?? null,
+              microsoftTokenExpiry: account.expires_at
+                ? new Date(account.expires_at * 1000)
+                : null,
+            },
+          })
+        } catch (dbError) {
+          console.error('[auth] Prisma upsert failed:', dbError)
+        }
       }
       return token
     },
