@@ -16,7 +16,7 @@
  *   BOT_AUDIO_DIR (optionnel) — dossier pour les fichiers audio temporaires
  */
 
-import { chromium, type Browser, type Page } from 'playwright'
+import { chromium, type Browser, type Page } from 'playwright-core'
 import { spawn, type ChildProcess } from 'child_process'
 import * as fs from 'fs'
 import * as path from 'path'
