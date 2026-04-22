@@ -1,8 +1,8 @@
 'use client'
 import { useEffect, useState, useCallback } from 'react'
-import { useParams } from 'next/navigation'
+import { useParams, useRouter } from 'next/navigation'
 import { toast } from 'sonner'
-import { Download, Send } from 'lucide-react'
+import { Download, Send, RefreshCw, AlignLeft, FileText } from 'lucide-react'
 import { Button, Badge } from '@/components/ui'
 import { SectionEditor } from '@/components/minutes/SectionEditor'
 import { SendModal } from '@/components/minutes/SendModal'
@@ -23,10 +23,12 @@ const statusConfig: Record<string, { label: string; variant: 'default' | 'warnin
 
 interface MinutesData {
   id: string
+  meetingId: string
   status: string
   content: MinutesContent
   template?: { sections: TemplateSection[] } | null
   meeting: {
+    id: string
     subject: string
     startDateTime: string
     participants: Array<{ name: string; email: string }>
@@ -36,10 +38,12 @@ interface MinutesData {
 
 export default function MinutesDetailPage() {
   const { id } = useParams<{ id: string }>()
+  const router = useRouter()
   const [data, setData] = useState<MinutesData | null>(null)
   const [content, setContent] = useState<MinutesContent | null>(null)
   const [sendOpen, setSendOpen] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [regenerating, setRegenerating] = useState(false)
 
   useEffect(() => {
     fetch(`/api/minutes/${id}`)
@@ -70,6 +74,31 @@ export default function MinutesDetailPage() {
     return () => clearTimeout(timer)
   }, [content, save])
 
+  async function handleRegenerate(style: 'detailed' | 'concise') {
+    if (!data) return
+    setRegenerating(true)
+    try {
+      const res = await fetch(`/api/generate/${data.meeting.id}/retranscribe`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ style }),
+      })
+      if (!res.ok) {
+        const err = await res.json()
+        toast.error(err.error ?? 'Erreur lors de la régénération')
+        return
+      }
+      toast.success('Compte rendu régénéré')
+      router.refresh()
+      // Reload fresh content
+      const fresh = await fetch(`/api/minutes/${id}`).then(r => r.json())
+      setData(fresh)
+      setContent(fresh.content)
+    } finally {
+      setRegenerating(false)
+    }
+  }
+
   async function handleSend(recipients: Array<{ name: string; email: string }>) {
     if (!content) return
     await save(content)
@@ -99,16 +128,36 @@ export default function MinutesDetailPage() {
 
   return (
     <div className="max-w-3xl space-y-6">
-      <div className="flex items-start justify-between">
-        <div>
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex-1 min-w-0">
           <h1 className="text-2xl font-bold text-gray-900">{data.meeting.subject}</h1>
           <p className="text-sm text-gray-500 mt-1">
             {formatDateTime(data.meeting.startDateTime)}
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <Badge variant={status.variant}>{status.label}</Badge>
-          {saving && <span className="text-xs text-gray-400">Sauvegarde…</span>}
+        <div className="flex flex-col items-end gap-2 shrink-0">
+          <div className="flex items-center gap-2">
+            <Badge variant={status.variant}>{status.label}</Badge>
+            {saving && <span className="text-xs text-gray-400">Sauvegarde…</span>}
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => handleRegenerate('detailed')}
+              disabled={regenerating}
+              className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-blue-600 border border-gray-200 rounded-lg px-3 py-1.5 hover:border-blue-300 disabled:opacity-50 transition-colors"
+            >
+              <FileText size={12} />
+              {regenerating ? 'Génération…' : 'Régénérer — Développé'}
+            </button>
+            <button
+              onClick={() => handleRegenerate('concise')}
+              disabled={regenerating}
+              className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-blue-600 border border-gray-200 rounded-lg px-3 py-1.5 hover:border-blue-300 disabled:opacity-50 transition-colors"
+            >
+              <AlignLeft size={12} />
+              {regenerating ? 'Génération…' : 'Régénérer — Synthétique'}
+            </button>
+          </div>
         </div>
       </div>
 
