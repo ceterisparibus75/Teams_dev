@@ -35,6 +35,7 @@ export async function GET(req: NextRequest) {
           startDateTime: new Date(gm.startDateTime),
           endDateTime: new Date(gm.endDateTime),
           organizerId: user.id,
+          joinUrl: gm.joinUrl ?? null,
           participants: {
             create: gm.attendees.map((a) => ({
               name: a.emailAddress.name,
@@ -72,7 +73,7 @@ export async function GET(req: NextRequest) {
       const defaultTemplate = await prisma.template.findFirst({ where: { isDefault: true } })
 
       // Transcription in memory only — never persisted (RGPD)
-      const transcription = await getTranscription(user.id, gm.id)
+      const transcription = await getTranscription(user.id, gm.joinUrl)
       const content = await generateMinutesContent(gm.subject, transcription)
 
       await prisma.meetingMinutes.create({

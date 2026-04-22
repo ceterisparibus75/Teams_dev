@@ -17,9 +17,12 @@ export const authOptions: NextAuthOptions = {
   ],
   session: { strategy: 'jwt' },
   callbacks: {
-    async jwt({ token, account }) {
+    async jwt({ token, account, profile }) {
       if (account) {
-        token.microsoftId = account.providerAccountId
+        // Utiliser le claim 'oid' (Object ID Azure AD) — toujours un vrai GUID
+        // providerAccountId peut être le claim 'sub' qui n'est pas toujours un GUID valide
+        const oid = (profile as { oid?: string } | undefined)?.oid ?? account.providerAccountId
+        token.microsoftId = oid
         token.accessToken = account.access_token
         token.refreshToken = account.refresh_token
         token.accessTokenExpires = account.expires_at
@@ -28,7 +31,7 @@ export const authOptions: NextAuthOptions = {
           where: { email: token.email! },
           update: {
             name: token.name ?? '',
-            microsoftId: account.providerAccountId,
+            microsoftId: oid,
             microsoftAccessToken: account.access_token ?? null,
             microsoftRefreshToken: account.refresh_token ?? null,
             microsoftTokenExpiry: account.expires_at
@@ -38,7 +41,7 @@ export const authOptions: NextAuthOptions = {
           create: {
             email: token.email!,
             name: token.name ?? '',
-            microsoftId: account.providerAccountId,
+            microsoftId: oid,
             microsoftAccessToken: account.access_token ?? null,
             microsoftRefreshToken: account.refresh_token ?? null,
             microsoftTokenExpiry: account.expires_at

@@ -1,6 +1,9 @@
+'use client'
+import { useState } from 'react'
+import { toast } from 'sonner'
 import { formatDateTime } from '@/lib/utils'
 import { Badge } from '@/components/ui'
-import { Users, Mic, MicOff } from 'lucide-react'
+import { Users, Mic, MicOff, RefreshCw } from 'lucide-react'
 
 interface Meeting {
   id: string
@@ -24,7 +27,24 @@ const statusLabel: Record<string, { label: string; variant: 'default' | 'warning
 }
 
 export function MeetingCard({ meeting, onGenerate, generating }: MeetingCardProps) {
+  const [retranscribing, setRetranscribing] = useState(false)
   const status = meeting.minutes ? statusLabel[meeting.minutes.status] : null
+
+  async function handleRetranscribe() {
+    setRetranscribing(true)
+    try {
+      const res = await fetch(`/api/generate/${meeting.id}/retranscribe`, { method: 'POST' })
+      if (res.ok) {
+        toast.success('Compte rendu mis à jour avec la transcription')
+        window.location.reload()
+      } else {
+        const { error } = await res.json()
+        toast.error(error ?? 'Erreur lors de la récupération de la transcription')
+      }
+    } finally {
+      setRetranscribing(false)
+    }
+  }
 
   return (
     <div className="bg-white border border-gray-200 rounded-xl p-5 flex items-start justify-between gap-4">
@@ -63,6 +83,16 @@ export function MeetingCard({ meeting, onGenerate, generating }: MeetingCardProp
           >
             Ouvrir
           </a>
+        )}
+        {meeting.minutes && !meeting.hasTranscription && (
+          <button
+            onClick={handleRetranscribe}
+            disabled={retranscribing}
+            className="flex items-center gap-1 text-xs text-gray-500 hover:text-blue-600 disabled:opacity-50"
+          >
+            <RefreshCw size={11} className={retranscribing ? 'animate-spin' : ''} />
+            {retranscribing ? 'Récupération…' : 'Ajouter la transcription'}
+          </button>
         )}
       </div>
     </div>

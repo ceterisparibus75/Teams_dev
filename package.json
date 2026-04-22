@@ -8,16 +8,20 @@
     "start": "next start",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
-    "db:seed": "ts-node --compiler-options '{\"module\":\"CommonJS\"}' prisma/seed.ts"
+    "db:seed": "ts-node --compiler-options '{\"module\":\"CommonJS\"}' prisma/seed.ts",
+    "bot": "ts-node --project tsconfig.bot.json bot/index.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.90.0",
+    "@azure/communication-call-automation": "^1.5.1",
     "@azure/msal-node": "^5.1.4",
     "@microsoft/microsoft-graph-client": "^3.0.7",
     "@prisma/client": "^6.19.3",
     "clsx": "^2.1.1",
     "date-fns": "^4.1.0",
     "docx": "^9.6.1",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
     "lucide-react": "^1.8.0",
     "next": "16.2.4",
     "next-auth": "^4.24.14",
@@ -30,6 +34,7 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
+    "@types/express": "^5.0.6",
     "@types/jest": "^30.0.0",
     "@types/node": "^20",
     "@types/react": "^19",
@@ -38,6 +43,7 @@
     "jest-environment-node": "^30.3.0",
     "tailwindcss": "^4",
     "ts-jest": "^29.4.9",
+    "ts-node": "^10.9.2",
     "typescript": "^5"
   }
 }

@@ -26,7 +26,10 @@ export default function ReunionsPage() {
         setMeetings(Array.isArray(data) ? data : [])
         setLoading(false)
       })
-      .catch(() => setLoading(false))
+      .catch((err) => {
+        console.error('[reunions] fetch error:', err)
+        setLoading(false)
+      })
   }, [])
 
   async function handleGenerate(meetingId: string) {

@@ -21,6 +21,7 @@ export async function GET() {
             startDateTime: new Date(gm.startDateTime),
             endDateTime: new Date(gm.endDateTime),
             organizerId: session.user.id,
+            joinUrl: gm.joinUrl ?? null,
             participants: {
               create: gm.attendees.map((a) => ({
                 name: a.emailAddress.name,

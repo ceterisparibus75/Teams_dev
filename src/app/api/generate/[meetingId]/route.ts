@@ -34,7 +34,7 @@ export async function POST(
   const defaultTemplate = await prisma.template.findFirst({ where: { isDefault: true } })
 
   // Transcription fetched in memory only — never persisted
-  const transcription = await getTranscription(session.user.id, meetingId)
+  const transcription = await getTranscription(session.user.id, meeting.joinUrl)
 
   const content = await generateMinutesContent(meeting.subject, transcription)
 

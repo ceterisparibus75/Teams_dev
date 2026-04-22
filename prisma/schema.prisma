@@ -3,8 +3,9 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 model User {
@@ -27,6 +28,7 @@ model Meeting {
   startDateTime    DateTime
   endDateTime      DateTime
   organizerId      String
+  joinUrl          String?
   organizer        User                  @relation(fields: [organizerId], references: [id])
   participants     MeetingParticipant[]
   collaborators    MeetingCollaborator[]
@@ -42,6 +44,7 @@ model MeetingParticipant {
   meeting   Meeting @relation(fields: [meetingId], references: [id], onDelete: Cascade)
   name      String
   email     String
+  company   String?
 }
 
 model MeetingCollaborator {

@@ -46,7 +46,8 @@ export async function getValidAccessToken(userId: string): Promise<string | null
       },
     })
     return result.accessToken
-  } catch {
+  } catch (error) {
+    console.error('[getValidAccessToken]', error)
     return null
   }
 }
@@ -57,22 +58,55 @@ function graphClient(accessToken: string): Client {
 
 // ─── Meetings ──────────────────────────────────────────────────────────────
 
+interface CalendarEvent {
+  id: string
+  subject: string
+  start: { dateTime: string; timeZone: string }
+  end: { dateTime: string; timeZone: string }
+  organizer: { emailAddress: { name: string; address: string } }
+  attendees: Array<{ emailAddress: { name: string; address: string } }>
+  isOnlineMeeting?: boolean
+  onlineMeeting?: { joinUrl?: string }
+}
+
+// Graph retourne des datetimes sans suffixe timezone (ex: "2026-04-27T07:00:00.0000000").
+// On ajoute 'Z' pour forcer l'interprétation UTC, conforme au champ timeZone:"UTC" renvoyé par l'API.
+function toUtcIso(dt: string): string {
+  return dt.endsWith('Z') || dt.includes('+') ? dt : dt + 'Z'
+}
+
+function toGraphMeeting(ev: CalendarEvent): GraphMeeting {
+  return {
+    id: ev.id,
+    subject: ev.subject,
+    startDateTime: toUtcIso(ev.start.dateTime),
+    endDateTime: toUtcIso(ev.end.dateTime),
+    organizer: ev.organizer,
+    attendees: ev.attendees ?? [],
+    joinUrl: ev.onlineMeeting?.joinUrl ?? null,
+  }
+}
+
 export async function getRecentMeetings(userId: string): Promise<GraphMeeting[]> {
   const token = await getValidAccessToken(userId)
   if (!token) return []
 
   const now = new Date()
   const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
+  const sevenDaysAhead = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000)
 
   try {
     const client = graphClient(token)
     const result = await client
-      .api('/me/onlineMeetings')
-      .filter(`startDateTime ge ${sevenDaysAgo.toISOString()} and endDateTime le ${now.toISOString()}`)
-      .select('id,subject,startDateTime,endDateTime,organizer,attendees')
+      .api('/me/calendarView')
+      .query({ startDateTime: sevenDaysAgo.toISOString(), endDateTime: sevenDaysAhead.toISOString() })
+      .select('id,subject,start,end,organizer,attendees,isOnlineMeeting,onlineMeeting')
+      .top(50)
       .get()
-    return result.value ?? []
-  } catch {
+    const events: CalendarEvent[] = result.value ?? []
+    return events.filter((ev) => ev.isOnlineMeeting || ev.onlineMeeting?.joinUrl).map(toGraphMeeting)
+  } catch (error) {
+    console.error('[getRecentMeetings]', error)
     return []
   }
 }
@@ -90,12 +124,14 @@ export async function getMeetingsEndedInLastHours(
   try {
     const client = graphClient(token)
     const result = await client
-      .api('/me/onlineMeetings')
-      .filter(`endDateTime ge ${since.toISOString()} and endDateTime le ${now.toISOString()}`)
-      .select('id,subject,startDateTime,endDateTime,organizer,attendees')
+      .api('/me/calendarView')
+      .query({ startDateTime: since.toISOString(), endDateTime: now.toISOString() })
+      .select('id,subject,start,end,organizer,attendees,isOnlineMeeting,onlineMeeting')
       .get()
-    return result.value ?? []
-  } catch {
+    const events: CalendarEvent[] = result.value ?? []
+    return events.filter((ev) => ev.isOnlineMeeting).map(toGraphMeeting)
+  } catch (error) {
+    console.error('[getMeetingsEndedInLastHours]', error)
     return []
   }
 }
@@ -104,27 +140,40 @@ export async function getMeetingsEndedInLastHours(
 
 export async function getTranscription(
   userId: string,
-  meetingId: string
+  joinUrl: string | null | undefined
 ): Promise<string | null> {
+  if (!joinUrl) return null
+
   const token = await getValidAccessToken(userId)
   if (!token) return null
 
   try {
     const client = graphClient(token)
+
+    // Resolve joinUrl → online meeting ID
+    const lookup = await client
+      .api('/me/onlineMeetings')
+      .filter(`JoinWebUrl eq '${joinUrl}'`)
+      .select('id')
+      .get()
+    const onlineMeetingId = lookup.value?.[0]?.id
+    if (!onlineMeetingId) return null
+
     const transcripts = await client
-      .api(`/me/onlineMeetings/${meetingId}/transcripts`)
+      .api(`/me/onlineMeetings/${onlineMeetingId}/transcripts`)
       .get()
 
     if (!transcripts.value?.length) return null
 
     const transcriptId = transcripts.value[0].id
     const content = await client
-      .api(`/me/onlineMeetings/${meetingId}/transcripts/${transcriptId}/content`)
+      .api(`/me/onlineMeetings/${onlineMeetingId}/transcripts/${transcriptId}/content`)
       .responseType('text' as never)
       .get()
 
     return typeof content === 'string' ? content : null
-  } catch {
+  } catch (error) {
+    console.error('[getTranscription]', error)
     return null
   }
 }

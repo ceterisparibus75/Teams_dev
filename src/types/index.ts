@@ -20,4 +20,5 @@ export interface GraphMeeting {
   endDateTime: string
   organizer: { emailAddress: { name: string; address: string } }
   attendees: Array<{ emailAddress: { name: string; address: string } }>
+  joinUrl?: string | null
 }
