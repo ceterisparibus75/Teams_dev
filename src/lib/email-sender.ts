@@ -12,10 +12,6 @@ export interface SendMinutesParams {
 }
 
 function buildHtmlBody(subject: string, content: MinutesContent): string {
-  const decisionsHtml = content.decisions.length
-    ? `<ul>${content.decisions.map((d) => `<li>${d}</li>`).join('')}</ul>`
-    : '<p><em>Aucune décision enregistrée.</em></p>'
-
   const actionsHtml = content.actions.length
     ? `<table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;width:100%">
         <tr style="background:#E5E7EB"><th>Description</th><th>Responsable</th><th>Échéance</th></tr>
@@ -29,7 +25,6 @@ function buildHtmlBody(subject: string, content: MinutesContent): string {
     <div style="font-family:Arial,sans-serif;max-width:700px">
       <h2 style="color:#1F2937">Compte rendu — ${subject}</h2>
       <p>${content.summary}</p>
-      <h3>Décisions</h3>${decisionsHtml}
       <h3>Actions à suivre</h3>${actionsHtml}
       ${content.notes ? `<h3>Notes complémentaires</h3><p>${content.notes}</p>` : ''}
       <hr/>

@@ -281,12 +281,6 @@ export async function generateDocx(params: {
     if (section.id === 'summary') {
       const text = content.summary?.trim()
       contentBlocks.push(bodyParagraph(text || 'Aucun résumé disponible.'))
-    } else if (section.id === 'decisions') {
-      if (!content.decisions?.length) {
-        contentBlocks.push(bodyParagraph('Aucune décision enregistrée.'))
-      } else {
-        content.decisions.forEach((d, i) => contentBlocks.push(numberedItem(i + 1, d)))
-      }
     } else if (section.id === 'actions') {
       if (!content.actions?.length) {
         contentBlocks.push(bodyParagraph('Aucune action à suivre.'))
