@@ -171,7 +171,18 @@ export async function getTranscription(
       .responseType('text' as never)
       .get()
 
-    return typeof content === 'string' ? content : null
+    if (typeof content !== 'string') return null
+
+    // Parse VTT into readable text "[Speaker] text" lines
+    const lines: string[] = []
+    for (const block of content.split('\n\n')) {
+      const match = block.match(/<v ([^>]+)>([\s\S]+)/)
+      if (match) {
+        const text = match[2].replace(/<[^>]+>/g, '').trim()
+        if (text) lines.push(`[${match[1].trim()}] ${text}`)
+      }
+    }
+    return lines.join('\n') || null
   } catch (error) {
     console.error('[getTranscription]', error)
     return null

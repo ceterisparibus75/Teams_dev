@@ -84,14 +84,14 @@ export function MeetingCard({ meeting, onGenerate, generating }: MeetingCardProp
             Ouvrir
           </a>
         )}
-        {meeting.minutes && !meeting.hasTranscription && (
+        {meeting.minutes && (
           <button
             onClick={handleRetranscribe}
             disabled={retranscribing}
             className="flex items-center gap-1 text-xs text-gray-500 hover:text-blue-600 disabled:opacity-50"
           >
             <RefreshCw size={11} className={retranscribing ? 'animate-spin' : ''} />
-            {retranscribing ? 'Récupération…' : 'Ajouter la transcription'}
+            {retranscribing ? 'Récupération…' : 'Actualiser avec transcription'}
           </button>
         )}
       </div>
