@@ -15,29 +15,46 @@ export function buildPrompt(subject: string, transcription: string | null, style
     : `Note : aucune transcription disponible pour cette réunion. Remplis uniquement les champs déductibles du sujet.`
 
   const styleInstructions = style === 'detailed'
-    ? `Style : DÉVELOPPÉ — rédige un résumé complet et narratif (8 à 15 phrases) qui retrace chronologiquement les échanges, les positions de chaque partie, les points de discussion et les conclusions. Le lecteur doit comprendre ce qui s'est passé sans avoir assisté à la réunion.`
-    : `Style : SYNTHÉTIQUE — rédige un résumé court et factuel (3 à 5 phrases) centré uniquement sur les points essentiels, les décisions et les conclusions. Pas de détail des échanges.`
+    ? `Style : COMPTE RENDU DÉVELOPPÉ
+
+Tu dois produire un compte rendu exhaustif, comme le ferait un juriste présent à la réunion.
+Structure obligatoire du champ "summary" :
+
+1. **Participants et contexte** — liste les personnes présentes et leur qualité (créancier, conseil, administrateur, etc.), rappelle l'objet de la réunion.
+
+2. **Déroulé par thème** — identifie les grands sujets abordés et consacre un paragraphe développé à chacun :
+   - Pour chaque thème : expose la situation initiale, détaille les échanges et positions de chaque partie (en attribuant les propos : "M. X a indiqué que…", "La société a contesté…"), mentionne les chiffres, dates, montants, délais évoqués.
+   - Ne résume pas : retranscris fidèlement la substance des échanges.
+
+3. **Points de désaccord ou points en suspens** — identifie ce qui n'est pas résolu.
+
+4. **Conclusions et suite** — ce qui a été acté à l'issue de la réunion.
+
+Le champ "summary" doit être long (plusieurs paragraphes, potentiellement 500 à 1500 mots selon la durée de la réunion). Utilise \\n\\n pour séparer les paragraphes.`
+    : `Style : COMPTE RENDU SYNTHÉTIQUE
+
+Rédige un résumé court et factuel (5 à 8 phrases maximum) centré uniquement sur : l'objet de la réunion, les points essentiels discutés, et les conclusions/décisions. Pas de détail des échanges.`
 
   return `Tu es un assistant juridique professionnel pour un cabinet d'administrateurs judiciaires (SELAS BL & Associés).
-Ta mission est de générer un compte rendu structuré de la réunion "${subject}".
+Ta mission est de générer un compte rendu de la réunion "${subject}".
 
 ${styleInstructions}
 
 Règles absolues :
-- Langue française uniquement
-- Ton professionnel et factuel
+- Langue française uniquement, ton professionnel et factuel
 - Ne jamais inventer d'informations absentes de la transcription
+- Mentionner les montants, dates, délais et noms exacts tels qu'ils apparaissent dans la transcription
 - Laisser les champs vides si l'information n'est pas disponible
 
 ${transcriptionBlock}
 
-Réponds UNIQUEMENT avec un objet JSON valide, sans markdown, respectant exactement ce schéma :
+Réponds UNIQUEMENT avec un objet JSON valide, sans markdown ni balises de code, respectant exactement ce schéma :
 {
-  "summary": "Résumé de la réunion selon le style demandé",
+  "summary": "Compte rendu complet selon le style demandé",
   "actions": [
     { "description": "Action à réaliser", "responsable": "Prénom Nom", "echeance": "YYYY-MM-DD" }
   ],
-  "notes": "Points complémentaires, observations, ou chaîne vide"
+  "notes": "Points complémentaires, observations importantes, ou chaîne vide"
 }`
 }
 
@@ -78,7 +95,7 @@ export async function generateMinutesContent(
   try {
     const response = await client.messages.create({
       model: 'claude-sonnet-4-6',
-      max_tokens: 4000,
+      max_tokens: 16000,
       messages: [{ role: 'user', content: prompt }],
     })
     const raw = response.content[0]?.type === 'text' ? response.content[0].text : ''

@@ -11,13 +11,18 @@ interface Props {
 export function SectionEditor({ section, content, onChange }: Props) {
   if (section.id === 'summary' || section.id === 'notes' || section.type === 'text') {
     const value = typeof content[section.id] === 'string' ? (content[section.id] as string) : ''
-    const rows = section.id === 'summary' ? 14 : 8
+    const minRows = section.id === 'summary' ? 20 : 8
     return (
       <textarea
         value={value}
-        onChange={(e) => onChange({ ...content, [section.id]: e.target.value })}
-        rows={rows}
-        className="w-full border border-gray-200 rounded-lg p-4 text-sm text-gray-700 leading-relaxed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 resize-y"
+        onChange={(e) => {
+          onChange({ ...content, [section.id]: e.target.value })
+          e.target.style.height = 'auto'
+          e.target.style.height = `${e.target.scrollHeight}px`
+        }}
+        rows={minRows}
+        style={{ minHeight: `${minRows * 1.6}rem` }}
+        className="w-full border border-gray-200 rounded-lg p-4 text-sm text-gray-700 leading-relaxed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 resize-y overflow-auto"
         placeholder={`Saisir ${section.label.toLowerCase()}…`}
       />
     )
