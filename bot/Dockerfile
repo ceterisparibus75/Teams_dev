@@ -47,7 +47,7 @@ WORKDIR /app
 COPY package*.json ./
 
 # Inclure les devDependencies car ts-node et typescript sont nécessaires au runtime
-RUN npm ci
+RUN npm install
 
 COPY bot/               ./bot/
 COPY prisma/            ./prisma/
