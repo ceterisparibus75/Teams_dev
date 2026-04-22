@@ -1,10 +1,8 @@
 # Bot service — image Linux avec Playwright, Xvfb, PulseAudio et ffmpeg
-# Déployer sur Azure Container Instance ou Azure App Service (Linux)
 
 FROM node:20-bookworm-slim
 
-# ── Variables d'environnement AVANT npm install ──────────────────────────────
-# Indispensable pour que Playwright ne télécharge pas Chromium pendant npm ci
+# Doit être défini AVANT npm install pour bloquer le téléchargement des navigateurs
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 ENV PLAYWRIGHT_CHROMIUM_PATH=/usr/bin/chromium
 ENV BOT_DISPLAY=:99
@@ -30,8 +28,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     curl \
     ca-certificates \
-    build-essential \
     python3 \
+    make \
+    g++ \
   && apt-get clean \
   && rm -rf /var/lib/apt/lists/*
 
@@ -44,9 +43,9 @@ RUN mkdir -p /tmp/pulse && \
 # ── Application ──────────────────────────────────────────────────────────────
 WORKDIR /app
 
-COPY package*.json ./
+# Utiliser le package.json minimal du bot uniquement
+COPY bot/package.json ./package.json
 
-# Inclure les devDependencies car ts-node et typescript sont nécessaires au runtime
 RUN npm install
 
 COPY bot/               ./bot/
