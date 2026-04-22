@@ -28,6 +28,25 @@ export type TranscriptionResult =
       detail?: string
     }
 
+interface TranscriptionLookupOptions {
+  subject?: string | null
+}
+
+interface DriveItemLike {
+  id?: string
+  name?: string
+  webUrl?: string
+  parentReference?: { driveId?: string; path?: string }
+  file?: { mimeType?: string }
+  remoteItem?: {
+    id?: string
+    name?: string
+    webUrl?: string
+    parentReference?: { driveId?: string; path?: string }
+    file?: { mimeType?: string }
+  }
+}
+
 // ─── Token management ──────────────────────────────────────────────────────
 
 interface AccessTokenClaims {
@@ -80,6 +99,20 @@ function tokenHasTranscriptScope(accessToken: string): boolean {
   return (
     scopes.has('OnlineMeetingTranscript.Read.All') ||
     roles.has('OnlineMeetingTranscript.Read.All')
+  )
+}
+
+function tokenHasFileReadScope(accessToken: string): boolean {
+  const claims = decodeAccessTokenClaims(accessToken)
+  if (!claims) return false
+
+  const scopes = new Set((claims.scp ?? '').split(' ').filter(Boolean))
+  const roles = new Set(claims.roles ?? [])
+
+  return (
+    scopes.has('Files.Read') ||
+    scopes.has('Files.Read.All') ||
+    roles.has('Files.Read.All')
   )
 }
 
@@ -269,6 +302,129 @@ async function graphGetText(accessToken: string, path: string, query?: URLSearch
   return payloadText
 }
 
+function simplifyQueryTerm(value: string): string {
+  return value
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^\w\s-]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function extractDriveReference(item: DriveItemLike): { driveId?: string; itemId?: string; name?: string; webUrl?: string; path?: string } {
+  const remote = item.remoteItem
+
+  return {
+    driveId: remote?.parentReference?.driveId ?? item.parentReference?.driveId,
+    itemId: remote?.id ?? item.id,
+    name: remote?.name ?? item.name,
+    webUrl: remote?.webUrl ?? item.webUrl,
+    path: remote?.parentReference?.path ?? item.parentReference?.path,
+  }
+}
+
+function scoreTranscriptCandidate(item: DriveItemLike, subject: string): number {
+  const ref = extractDriveReference(item)
+  const name = (ref.name ?? '').toLowerCase()
+  const path = (ref.path ?? '').toLowerCase()
+  const simplifiedSubject = simplifyQueryTerm(subject).toLowerCase()
+
+  let score = 0
+  if (name.endsWith('.vtt')) score += 100
+  if (name.endsWith('.docx')) score += 20
+  if (path.includes('/recordings')) score += 30
+  if (simplifiedSubject && name.includes(simplifiedSubject)) score += 40
+
+  const subjectTokens = simplifiedSubject.split(' ').filter((token) => token.length >= 4)
+  for (const token of subjectTokens) {
+    if (name.includes(token)) score += 8
+  }
+
+  return score
+}
+
+function parseTranscriptText(content: string): string | null {
+  const lines: string[] = []
+
+  for (const block of content.split('\n\n')) {
+    const jsonLines = block
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line.startsWith('{') && line.endsWith('}'))
+
+    if (jsonLines.length > 0) {
+      for (const line of jsonLines) {
+        try {
+          const entry = JSON.parse(line) as { speakerName?: string; spokenText?: string }
+          const speaker = entry.speakerName?.trim()
+          const text = entry.spokenText?.trim()
+          if (text) lines.push(speaker ? `[${speaker}] ${text}` : text)
+        } catch {
+          // Ignore malformed JSON lines and continue parsing.
+        }
+      }
+      continue
+    }
+
+    const match = block.match(/<v ([^>]+)>([\s\S]+)/)
+    if (match) {
+      const text = match[2].replace(/<[^>]+>/g, '').trim()
+      if (text) lines.push(`[${match[1].trim()}] ${text}`)
+    }
+  }
+
+  return lines.join('\n') || null
+}
+
+async function searchTranscriptFile(
+  accessToken: string,
+  subject: string
+): Promise<{ transcription: string; detail: string } | null> {
+  const searchQueries = Array.from(
+    new Set(
+      [
+        simplifyQueryTerm(subject),
+        simplifyQueryTerm(subject)
+          .split(' ')
+          .filter((token) => token.length >= 4)
+          .slice(0, 5)
+          .join(' '),
+      ].filter(Boolean)
+    )
+  )
+
+  for (const queryText of searchQueries) {
+    const searchPath = `/me/drive/search(q='${encodeURIComponent(queryText).replace(/'/g, "%27")}')`
+    const results = await graphGetJson<{ value?: DriveItemLike[] }>(accessToken, searchPath)
+    const candidates = (results.value ?? [])
+      .filter((item) => {
+        const ref = extractDriveReference(item)
+        const name = (ref.name ?? '').toLowerCase()
+        return name.endsWith('.vtt') || name.endsWith('.docx')
+      })
+      .sort((a, b) => scoreTranscriptCandidate(b, subject) - scoreTranscriptCandidate(a, subject))
+
+    for (const candidate of candidates) {
+      const ref = extractDriveReference(candidate)
+      if (!ref.driveId || !ref.itemId || !ref.name?.toLowerCase().endsWith('.vtt')) continue
+
+      const content = await graphGetText(
+        accessToken,
+        `/drives/${encodeURIComponent(ref.driveId)}/items/${encodeURIComponent(ref.itemId)}/content`
+      )
+      const parsed = parseTranscriptText(content)
+      if (parsed) {
+        return {
+          transcription: parsed,
+          detail: `Fallback fichier: ${ref.name}${ref.webUrl ? ` (${ref.webUrl})` : ''}`,
+        }
+      }
+    }
+  }
+
+  return null
+}
+
 // ─── Meetings ──────────────────────────────────────────────────────────────
 
 interface CalendarEvent {
@@ -353,9 +509,10 @@ export async function getMeetingsEndedInLastHours(
 
 export async function getTranscription(
   userId: string,
-  joinUrl: string | null | undefined
+  joinUrl: string | null | undefined,
+  options?: TranscriptionLookupOptions
 ): Promise<string | null> {
-  const result = await getTranscriptionResult(userId, joinUrl)
+  const result = await getTranscriptionResult(userId, joinUrl, options)
   return result.ok ? result.transcription : null
 }
 
@@ -373,7 +530,8 @@ function isPermissionError(error: unknown): boolean {
 
 export async function getTranscriptionResult(
   userId: string,
-  joinUrl: string | null | undefined
+  joinUrl: string | null | undefined,
+  options?: TranscriptionLookupOptions
 ): Promise<TranscriptionResult> {
   if (!joinUrl) return { ok: false, reason: 'missing_join_url' }
 
@@ -396,6 +554,41 @@ export async function getTranscriptionResult(
         'Le token delegue ne contient pas OnlineMeetingTranscript.Read.All.',
         tokenResult.debug
       ),
+    }
+  }
+
+  const canSearchFiles = tokenHasFileReadScope(tokenResult.accessToken)
+  const tryFileFallback = async (detail: string | undefined): Promise<TranscriptionResult | null> => {
+    const subject = options?.subject?.trim()
+    if (!subject) return null
+    if (!canSearchFiles) {
+      return {
+        ok: false,
+        reason: 'permission_denied',
+        detail: mergeDebug(
+          `${detail ?? 'Acces transcript refuse.'} | Le token ne contient pas Files.Read ou Files.Read.All pour chercher le fichier de transcription OneDrive/SharePoint.`,
+          tokenResult.debug
+        ),
+      }
+    }
+
+    try {
+      const transcriptFile = await searchTranscriptFile(tokenResult.accessToken, subject)
+      if (!transcriptFile) return null
+
+      return {
+        ok: true,
+        transcription: transcriptFile.transcription,
+      }
+    } catch (error) {
+      return {
+        ok: false,
+        reason: isPermissionError(error) ? 'permission_denied' : 'graph_error',
+        detail: mergeDebug(
+          `${detail ?? 'Acces transcript refuse.'} | Fallback fichier: ${getErrorMessage(error) ?? 'Erreur inconnue'}`,
+          tokenResult.debug
+        ),
+      }
     }
   }
 
@@ -454,6 +647,8 @@ export async function getTranscriptionResult(
     if (!transcripts) {
       const detail = mergeDebug(transcriptErrors.join(' || '), tokenResult.debug)
       if (transcriptErrors.some((entry) => isForbiddenDetail(entry))) {
+        const fallbackResult = await tryFileFallback(detail)
+        if (fallbackResult) return fallbackResult
         return { ok: false, reason: 'permission_denied', detail }
       }
       return { ok: false, reason: 'graph_error', detail }
@@ -509,6 +704,8 @@ export async function getTranscriptionResult(
     if (!content) {
       const detail = mergeDebug(contentErrors.join(' || '), tokenResult.debug)
       if (contentErrors.some((entry) => isForbiddenDetail(entry))) {
+        const fallbackResult = await tryFileFallback(detail)
+        if (fallbackResult) return fallbackResult
         return { ok: false, reason: 'permission_denied', detail }
       }
       return { ok: false, reason: 'graph_error', detail }
@@ -519,15 +716,7 @@ export async function getTranscriptionResult(
     }
 
     // Parse VTT into readable text "[Speaker] text" lines
-    const lines: string[] = []
-    for (const block of content.split('\n\n')) {
-      const match = block.match(/<v ([^>]+)>([\s\S]+)/)
-      if (match) {
-        const text = match[2].replace(/<[^>]+>/g, '').trim()
-        if (text) lines.push(`[${match[1].trim()}] ${text}`)
-      }
-    }
-    const transcription = lines.join('\n')
+    const transcription = parseTranscriptText(content)
     if (!transcription) {
       return { ok: false, reason: 'transcript_empty' }
     }

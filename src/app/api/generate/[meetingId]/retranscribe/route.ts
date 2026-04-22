@@ -100,7 +100,9 @@ export async function POST(
   if (!meeting.joinUrl)
     return NextResponse.json({ error: 'Lien de réunion manquant en base' }, { status: 422 })
 
-  const transcriptResult = await getTranscriptionResult(session.user.id, meeting.joinUrl)
+  const transcriptResult = await getTranscriptionResult(session.user.id, meeting.joinUrl, {
+    subject: meeting.subject,
+  })
 
   if (!transcriptResult.ok) {
     const response = buildTranscriptionError(transcriptResult)

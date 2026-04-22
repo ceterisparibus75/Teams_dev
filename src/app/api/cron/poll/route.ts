@@ -73,7 +73,9 @@ export async function GET(req: NextRequest) {
       const defaultTemplate = await prisma.template.findFirst({ where: { isDefault: true } })
 
       // Transcription in memory only — never persisted (RGPD)
-      const transcription = await getTranscription(user.id, gm.joinUrl)
+      const transcription = await getTranscription(user.id, gm.joinUrl, {
+        subject: gm.subject,
+      })
       const content = await generateMinutesContent(gm.subject, transcription)
 
       await prisma.meetingMinutes.create({

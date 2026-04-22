@@ -32,7 +32,9 @@ export async function POST(
   const existingMinutes = await prisma.meetingMinutes.findUnique({ where: { meetingId } })
 
   const defaultTemplate = await prisma.template.findFirst({ where: { isDefault: true } })
-  const transcription = await getTranscription(session.user.id, meeting.joinUrl)
+  const transcription = await getTranscription(session.user.id, meeting.joinUrl, {
+    subject: meeting.subject,
+  })
   const content = await generateMinutesContent(meeting.subject, transcription, style)
 
   if (existingMinutes) {

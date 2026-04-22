@@ -1,6 +1,7 @@
 export const MICROSOFT_GRAPH_SCOPES = [
   'User.Read',
   'Calendars.Read',
+  'Files.Read.All',
   'OnlineMeetings.Read',
   'OnlineMeetingTranscript.Read.All',
   'Mail.Send',
