@@ -10,7 +10,7 @@ export const authOptions: NextAuthOptions = {
       tenantId: process.env.AZURE_AD_TENANT_ID!,
       authorization: {
         params: {
-          scope: 'openid profile email offline_access User.Read Calendars.Read',
+          scope: 'openid profile email offline_access User.Read Calendars.Read OnlineMeetings.Read OnlineMeetingTranscript.Read',
         },
       },
       checks: ['state'],
