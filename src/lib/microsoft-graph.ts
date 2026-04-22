@@ -5,7 +5,7 @@ import { MICROSOFT_GRAPH_SCOPES } from '@/lib/microsoft-scopes'
 import type { GraphMeeting } from '@/types'
 
 type AccessTokenResult =
-  | { ok: true; accessToken: string }
+  | { ok: true; accessToken: string; debug?: string }
   | {
       ok: false
       reason: 'missing_connection' | 'reauth_required' | 'graph_error'
@@ -29,6 +29,63 @@ export type TranscriptionResult =
     }
 
 // ─── Token management ──────────────────────────────────────────────────────
+
+interface AccessTokenClaims {
+  scp?: string
+  roles?: string[]
+  oid?: string
+  tid?: string
+  upn?: string
+  preferred_username?: string
+  unique_name?: string
+  name?: string
+}
+
+function decodeAccessTokenClaims(accessToken: string): AccessTokenClaims | null {
+  const parts = accessToken.split('.')
+  if (parts.length < 2) return null
+
+  try {
+    const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/')
+    const padded = base64.padEnd(Math.ceil(base64.length / 4) * 4, '=')
+    const payload = Buffer.from(padded, 'base64').toString('utf8')
+    return JSON.parse(payload) as AccessTokenClaims
+  } catch {
+    return null
+  }
+}
+
+function buildTokenDebug(accessToken: string): string | undefined {
+  const claims = decodeAccessTokenClaims(accessToken)
+  if (!claims) return undefined
+
+  const user =
+    claims.preferred_username ??
+    claims.upn ??
+    claims.unique_name ??
+    claims.name ??
+    'inconnu'
+  const scopes = claims.scp ?? (claims.roles?.join(' ') || 'aucun')
+
+  return `user=${user}; oid=${claims.oid ?? 'n/a'}; tid=${claims.tid ?? 'n/a'}; scopes=${scopes}`
+}
+
+function tokenHasTranscriptScope(accessToken: string): boolean {
+  const claims = decodeAccessTokenClaims(accessToken)
+  if (!claims) return false
+
+  const scopes = new Set((claims.scp ?? '').split(' ').filter(Boolean))
+  const roles = new Set(claims.roles ?? [])
+
+  return (
+    scopes.has('OnlineMeetingTranscript.Read.All') ||
+    roles.has('OnlineMeetingTranscript.Read.All')
+  )
+}
+
+function mergeDebug(detail: string | undefined, debug: string | undefined): string | undefined {
+  return [detail, debug].filter(Boolean).join(' | ') || undefined
+}
 
 function getErrorMessage(error: unknown): string | undefined {
   if (typeof error === 'string') return error
@@ -92,7 +149,11 @@ async function getAccessTokenResult(userId: string): Promise<AccessTokenResult> 
 
   if (user.microsoftAccessToken && user.microsoftTokenExpiry) {
     if (Date.now() < new Date(user.microsoftTokenExpiry).getTime() - 5 * 60 * 1000) {
-      return { ok: true, accessToken: user.microsoftAccessToken }
+      return {
+        ok: true,
+        accessToken: user.microsoftAccessToken,
+        debug: buildTokenDebug(user.microsoftAccessToken),
+      }
     }
   }
 
@@ -120,7 +181,11 @@ async function getAccessTokenResult(userId: string): Promise<AccessTokenResult> 
         microsoftTokenExpiry: result.expiresOn ?? new Date(Date.now() + 3600 * 1000),
       },
     })
-    return { ok: true, accessToken: result.accessToken }
+    return {
+      ok: true,
+      accessToken: result.accessToken,
+      debug: buildTokenDebug(result.accessToken),
+    }
   } catch (error) {
     console.error('[getValidAccessToken]', error)
     if (isReauthError(error)) {
@@ -318,6 +383,17 @@ export async function getTranscriptionResult(
     return { ok: false, reason: 'graph_error', detail: tokenResult.detail }
   }
 
+  if (!tokenHasTranscriptScope(tokenResult.accessToken)) {
+    return {
+      ok: false,
+      reason: 'permission_denied',
+      detail: mergeDebug(
+        'Le token delegue ne contient pas OnlineMeetingTranscript.Read.All.',
+        tokenResult.debug
+      ),
+    }
+  }
+
   try {
     const escapedJoinUrl = escapeODataString(joinUrl)
     const meetingLookup = new URLSearchParams({
@@ -374,13 +450,25 @@ export async function getTranscriptionResult(
   } catch (error) {
     console.error('[getTranscription]', error)
     if (isPermissionError(error)) {
-      return { ok: false, reason: 'permission_denied', detail: getErrorMessage(error) }
+      return {
+        ok: false,
+        reason: 'permission_denied',
+        detail: mergeDebug(getErrorMessage(error), tokenResult.debug),
+      }
     }
 
     if (isReauthError(error)) {
-      return { ok: false, reason: 'reauth_required', detail: getErrorMessage(error) }
+      return {
+        ok: false,
+        reason: 'reauth_required',
+        detail: mergeDebug(getErrorMessage(error), tokenResult.debug),
+      }
     }
 
-    return { ok: false, reason: 'graph_error', detail: getErrorMessage(error) }
+    return {
+      ok: false,
+      reason: 'graph_error',
+      detail: mergeDebug(getErrorMessage(error), tokenResult.debug),
+    }
   }
 }
