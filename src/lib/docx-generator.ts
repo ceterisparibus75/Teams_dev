@@ -97,8 +97,8 @@ const CATEGORIE_LABELS: Record<string, string> = {
   conciliateur: 'Conciliateur',
   administrateur_judiciaire: 'Administrateur judiciaire',
   mandataire_judiciaire: 'Mandataire judiciaire',
-  debiteur: 'Débiteur',
-  conseil_debiteur: 'Conseil du débiteur',
+  debiteur: 'Entreprise',
+  conseil_debiteur: "Conseil de l'entreprise",
   partenaire_bancaire: 'Partenaires bancaires',
   conseil_partenaire: 'Conseil des partenaires bancaires',
   auditeur_expert: 'Auditeurs et experts',
@@ -138,24 +138,23 @@ function empty(space = 120): Paragraph {
 
 // ─── Cellules de tableau ──────────────────────────────────────────────────────
 
-function headerCell(text: string, bgColor: string): TableCell {
+function headerCell(text: string, cfg: TemplateConfig): TableCell {
   return new TableCell({
     children: [new Paragraph({
-      children: [new TextRun({ text, bold: true, size: 20, color: 'FFFFFF' })],
+      children: [new TextRun({ text, bold: true, size: 20, color: cfg.couleurTitres, font: cfg.policeTitres })],
       spacing: { before: 60, after: 60 },
     })],
-    shading: { type: ShadingType.SOLID, fill: bgColor },
+    shading: { type: ShadingType.SOLID, fill: cfg.couleurEnteteTableau },
     margins: { top: 60, bottom: 60, left: 100, right: 100 },
   })
 }
 
-function dataCell(text: string, shaded = false, bgColor = 'F5F5F5'): TableCell {
+function dataCell(text: string, cfg: TemplateConfig): TableCell {
   return new TableCell({
     children: [new Paragraph({
-      children: [new TextRun({ text, size: 20 })],
+      children: [new TextRun({ text, size: 20, font: cfg.policeCorps, color: cfg.couleurCorps })],
       spacing: { before: 60, after: 60 },
     })],
-    shading: shaded ? { type: ShadingType.SOLID, fill: bgColor } : undefined,
     margins: { top: 60, bottom: 60, left: 100, right: 100 },
   })
 }
@@ -279,17 +278,17 @@ function participantsTableSimple(participants: Participant[], cfg: TemplateConfi
   const headerRow = new TableRow({
     tableHeader: true,
     children: [
-      headerCell('Nom', cfg.couleurEnteteTableau.length === 6 ? cfg.couleurEnteteTableau : '70989C'),
-      headerCell('Société', cfg.couleurEnteteTableau.length === 6 ? cfg.couleurEnteteTableau : '70989C'),
-      headerCell('Email', cfg.couleurEnteteTableau.length === 6 ? cfg.couleurEnteteTableau : '70989C'),
-      headerCell('Présence', cfg.couleurEnteteTableau.length === 6 ? cfg.couleurEnteteTableau : '70989C'),
+      headerCell('Nom', cfg),
+      headerCell('Société', cfg),
+      headerCell('Email', cfg),
+      headerCell('Présence', cfg),
     ],
   })
   const dataRows = participants.map((p) => new TableRow({ children: [
-    dataCell(p.name),
-    dataCell(p.company ?? '—'),
-    dataCell(p.email),
-    dataCell('Visioconférence'),
+    dataCell(p.name, cfg),
+    dataCell(p.company ?? '—', cfg),
+    dataCell(p.email, cfg),
+    dataCell('Visioconférence', cfg),
   ]}))
   return new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, borders, rows: [headerRow, ...dataRows] })
 }
@@ -303,7 +302,6 @@ function participantsTableGrouped(pvParticipants: PvContent['participants'], cfg
   const absents  = pvParticipants.filter((p) => p.presence === 'Absent')
 
   const borders = gridBorders(cfg.couleurBordureTableau)
-  const bgColor = cfg.couleurEnteteTableau
 
   // ── Participants présents groupés par catégorie ─────────────────────────────
   const grouped = new Map<string, PvContent['participants']>()
@@ -327,15 +325,15 @@ function participantsTableGrouped(pvParticipants: PvContent['participants'], cfg
     const headerRow = new TableRow({
       tableHeader: true,
       children: [
-        headerCell('Nom et prénom', bgColor),
-        headerCell('Société / Qualité', bgColor),
-        headerCell('Présence', bgColor),
+        headerCell('Nom et prénom', cfg),
+        headerCell('Société / Qualité', cfg),
+        headerCell('Présence', cfg),
       ],
     })
     const dataRows = members.map((p) => new TableRow({ children: [
-      dataCell(p.civilite_nom),
-      dataCell(p.societe_qualite),
-      dataCell(p.presence),
+      dataCell(p.civilite_nom, cfg),
+      dataCell(p.societe_qualite, cfg),
+      dataCell(p.presence, cfg),
     ]}))
     result.push(new Table({
       width: { size: 100, type: WidthType.PERCENTAGE },
@@ -349,18 +347,18 @@ function participantsTableGrouped(pvParticipants: PvContent['participants'], cfg
   // ── Participants absents ────────────────────────────────────────────────────
   if (absents.length > 0) {
     result.push(empty(80))
-    result.push(sectionLabel('Absents excusés'))
+    result.push(sectionLabel('Absents excusés', cfg))
     result.push(empty(40))
     const absentHeader = new TableRow({
       tableHeader: true,
       children: [
-        headerCell('Nom et prénom', bgColor),
-        headerCell('Société / Qualité', bgColor),
+        headerCell('Nom et prénom', cfg),
+        headerCell('Société / Qualité', cfg),
       ],
     })
     const absentRows = absents.map((p) => new TableRow({ children: [
-      dataCell(p.civilite_nom),
-      dataCell(p.societe_qualite),
+      dataCell(p.civilite_nom, cfg),
+      dataCell(p.societe_qualite, cfg),
     ]}))
     result.push(new Table({
       width: { size: 100, type: WidthType.PERCENTAGE },
@@ -378,13 +376,12 @@ function participantsTableGrouped(pvParticipants: PvContent['participants'], cfg
 
 function actionsTable(actions: MinutesContent['actions'], cfg: TemplateConfig): Table {
   const borders = gridBorders(cfg.couleurBordureTableau)
-  const bgColor = cfg.couleurEnteteTableau
   const headerRow = new TableRow({
     tableHeader: true,
-    children: [headerCell('Action', bgColor), headerCell('Responsable', bgColor), headerCell('Échéance', bgColor)],
+    children: [headerCell('Action', cfg), headerCell('Responsable', cfg), headerCell('Échéance', cfg)],
   })
   const dataRows = actions.map((a) => new TableRow({ children: [
-    dataCell(a.description), dataCell(a.responsable), dataCell(a.echeance),
+    dataCell(a.description, cfg), dataCell(a.responsable, cfg), dataCell(a.echeance, cfg),
   ]}))
   return new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, columnWidths: [5000, 2500, 2500], borders, rows: [headerRow, ...dataRows] })
 }
@@ -407,11 +404,11 @@ function bulletPara(text: string, cfg: TemplateConfig): Paragraph {
   })
 }
 
-function sectionLabel(label: string): Paragraph {
+function sectionLabel(label: string, cfg: TemplateConfig): Paragraph {
   return new Paragraph({
     children: [
-      new TextRun({ text: label, underline: { type: UnderlineType.SINGLE }, size: 26 }),
-      new TextRun({ text: ' :', size: 26 }),
+      new TextRun({ text: label, underline: { type: UnderlineType.SINGLE }, size: 26, font: cfg.policeTitres, color: cfg.couleurCorps }),
+      new TextRun({ text: ' :', size: 26, font: cfg.policeTitres, color: cfg.couleurCorps }),
     ],
     spacing: { before: 200, after: 80 },
   })
@@ -500,8 +497,11 @@ export async function generateDocx(params: {
 
   // ── Bloc titre ────────────────────────────────────────────────────────────
   const pvData = content._pv as PvContent | undefined
-  const dateLabel = pvData?.metadata.date_reunion?.toUpperCase()
-    ?? format(date, 'dd MMMM yyyy', { locale: fr }).toUpperCase()
+  const rawDate = pvData?.metadata.date_reunion ?? ''
+  const isPlaceholder = !rawDate || /non précis/i.test(rawDate) || rawDate.trim().length < 3
+  const dateLabel = !isPlaceholder
+    ? rawDate.toUpperCase()
+    : format(date, 'dd MMMM yyyy', { locale: fr }).toUpperCase()
 
   const tealBorder = { style: BorderStyle.SINGLE, size: 18, color: cfg.couleurTitres }
   const titleBorder = {
@@ -514,7 +514,7 @@ export async function generateDocx(params: {
   const titleBlock: Paragraph[] = [
     new Paragraph({ text: '', border: titleBorder }),
     new Paragraph({
-      children: [new TextRun({ text: `PROCES VERBAL DE REUNION DU ${dateLabel}`, font: 'Utsaah', size: 40, bold: true })],
+      children: [new TextRun({ text: `PROCES VERBAL DE REUNION DU ${dateLabel}`, font: cfg.policeTitres, size: 40, bold: true })],
       alignment: AlignmentType.CENTER,
       border: titleBorder,
       spacing: { before: 80, after: 80 },
@@ -543,7 +543,7 @@ export async function generateDocx(params: {
   // ── Modalités ─────────────────────────────────────────────────────────────
   const modalitesText = pvData?.modalites ?? 'Réunion par visioconférence'
   const modalitesBlock: Paragraph[] = [
-    sectionLabel('Modalités de tenue de la réunion'),
+    sectionLabel('Modalités de tenue de la réunion', cfg),
     bulletPara(modalitesText, cfg),
     empty(100),
   ]
@@ -551,14 +551,14 @@ export async function generateDocx(params: {
   // ── Documents amont ────────────────────────────────────────────────────────
   const docAmontBlock: Paragraph[] = []
   if (pvData?.documents_amont?.length) {
-    docAmontBlock.push(sectionLabel('Documents communiqués en amont'))
+    docAmontBlock.push(sectionLabel('Documents communiqués en amont', cfg))
     pvData.documents_amont.forEach((d) => docAmontBlock.push(bulletPara(d, cfg)))
     docAmontBlock.push(empty(100))
   }
 
   // ── Personnes présentes ───────────────────────────────────────────────────
   const personnesBlock: (Paragraph | Table)[] = [
-    sectionLabel('Personnes présentes'),
+    sectionLabel('Personnes présentes', cfg),
     empty(60),
   ]
   if (pvData?.participants?.length) {
@@ -574,7 +574,7 @@ export async function generateDocx(params: {
   const pvSections = content.sections?.length ? content.sections : null
   const agendaItems = pvSections ? pvSections.map((s) => s.titre) : sections.map((s) => s.label)
   const odjBlock: Paragraph[] = [
-    sectionLabel('Ordre du jour'),
+    sectionLabel('Ordre du jour', cfg),
     ...agendaItems.map((item, i) => numberedItem(i + 1, item, cfg)),
     empty(200),
   ]

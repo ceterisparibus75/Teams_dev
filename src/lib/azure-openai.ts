@@ -68,10 +68,11 @@ Présence — règles strictes :
 - 'Téléphonique' : participant actif par téléphone
 - 'Absent' : invité à la réunion mais absent ou excusé (n'a pas participé aux échanges)
 Un participant présent mais qui ne prend pas la parole conserve son mode de présence (Visioconférence/Présentiel/Téléphonique) — seule l'absence totale justifie la valeur 'Absent'.
-⚠ RÈGLE ABSOLUE : Les membres de BL & Associés ne peuvent JAMAIS être catégorisés 'conseil_debiteur' ou 'conseil_partenaire'. BL & Associés est le cabinet mandataire — selon la procédure :
-- Mandat ad hoc → catégorie 'mandataire_ad_hoc'
-- Conciliation → catégorie 'conciliateur'
-- Redressement judiciaire ou Sauvegarde → catégorie 'administrateur_judiciaire'
+⚠⚠ RÈGLE ABSOLUE ET NON NÉGOCIABLE : Toute personne dont la société contient "BL & Associés" ou "SELAS BL" est OBLIGATOIREMENT membre du cabinet mandataire. Elle ne peut JAMAIS recevoir la catégorie 'conseil_debiteur' ou 'conseil_partenaire'. Catégorie obligatoire selon la procédure :
+- Mandat ad hoc → 'mandataire_ad_hoc'
+- Conciliation → 'conciliateur'
+- Redressement judiciaire ou Sauvegarde → 'administrateur_judiciaire'
+Erreur critique si un membre de BL & Associés est catégorisé autrement.
 actions : verbe à l'infinitif + objet précis, responsable avec entité entre parenthèses, échéance en français complet.
 prochaine_reunion : ne renseigne que si explicitement mentionnée.
 points_vigilance et precisions_a_apporter : réservés aux éléments ambigus ou sensibles.`
@@ -209,10 +210,7 @@ export function pvContentToMinutesContent(pv: PvContent): MinutesContent {
     ? `${pv.prochaine_reunion.date} à ${pv.prochaine_reunion.heure} (${pv.prochaine_reunion.fuseau ?? 'heure Paris'})`
     : undefined
 
-  const notes = [
-    ...pv.points_vigilance.map((p) => `⚠ ${p}`),
-    ...pv.precisions_a_apporter.map((p) => `→ ${p}`),
-  ].join('\n') || ''
+  const notes = pv.precisions_a_apporter.map((p) => `→ ${p}`).join('\n') || ''
 
   return {
     summary: pv.resume,
