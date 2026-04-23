@@ -31,8 +31,14 @@ export async function GET(
   if (!minutes) return NextResponse.json({ error: 'Introuvable' }, { status: 404 })
   const raw = minutes.content as Record<string, unknown>
   const generating = raw?._generating === true
-  const generationError = typeof raw?._generationError === 'string' ? raw._generationError : null
-  return NextResponse.json({ ...minutes, generating, generationError })
+  const startedAt = raw?._generatingStartedAt as string | undefined
+  const timedOut = generating && startedAt &&
+    (Date.now() - new Date(startedAt).getTime()) > 8 * 60 * 1000
+  const actualGenerating = generating && !timedOut
+  const generationError = timedOut
+    ? 'La génération a pris trop de temps. Cliquez sur "Régénérer le procès-verbal" pour réessayer.'
+    : (typeof raw?._generationError === 'string' ? raw._generationError : null)
+  return NextResponse.json({ ...minutes, generating: actualGenerating, generationError })
 }
 
 export async function PATCH(
