@@ -91,6 +91,9 @@ export default function ReunionsPage() {
     }
   }
 
+  const withTranscription = meetings.filter((m) => m.hasTranscription)
+  const withoutTranscription = meetings.filter((m) => !m.hasTranscription)
+
   if (loading) {
     return (
       <div className="space-y-3">
@@ -102,23 +105,47 @@ export default function ReunionsPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       <h1 className="text-2xl font-bold text-gray-900">Réunions</h1>
-      {meetings.length === 0 ? (
-        <p className="text-sm text-gray-500">
-          Aucune réunion trouvée dans les 7 derniers jours.
-        </p>
-      ) : (
-        meetings.map((m) => (
-          <MeetingCard
-            key={m.id}
-            meeting={m}
-            onGenerate={handleGenerate}
-            onTriggerBot={handleTriggerBot}
-            generating={generating === m.id}
-            triggeringBot={triggeringBot === m.id}
-          />
-        ))
+
+      {meetings.length === 0 && (
+        <p className="text-sm text-gray-500">Aucune réunion trouvée dans les 7 derniers jours.</p>
+      )}
+
+      {withTranscription.length > 0 && (
+        <div className="space-y-3">
+          <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide">
+            Transcription disponible ({withTranscription.length})
+          </h2>
+          {withTranscription.map((m) => (
+            <MeetingCard
+              key={m.id}
+              meeting={m}
+              onGenerate={handleGenerate}
+              onTriggerBot={handleTriggerBot}
+              generating={generating === m.id}
+              triggeringBot={triggeringBot === m.id}
+            />
+          ))}
+        </div>
+      )}
+
+      {withoutTranscription.length > 0 && (
+        <div className="space-y-3">
+          <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide">
+            Sans transcription ({withoutTranscription.length})
+          </h2>
+          {withoutTranscription.map((m) => (
+            <MeetingCard
+              key={m.id}
+              meeting={m}
+              onGenerate={handleGenerate}
+              onTriggerBot={handleTriggerBot}
+              generating={generating === m.id}
+              triggeringBot={triggeringBot === m.id}
+            />
+          ))}
+        </div>
       )}
     </div>
   )

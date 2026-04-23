@@ -27,10 +27,10 @@ const STATUT_CONFIG: Record<string, { label: string; variant: 'default' | 'succe
   ARCHIVE:  { label: 'Archivé',  variant: 'default' },
 }
 
-const MINUTES_STATUS: Record<string, { label: string; variant: 'default' | 'success' | 'warning' }> = {
-  DRAFT:    { label: 'Brouillon',       variant: 'warning' },
-  REVIEWED: { label: 'Prêt à envoyer', variant: 'default' },
-  SENT:     { label: 'Envoyé',          variant: 'success' },
+const MINUTES_STATUS: Record<string, { label: string; variant: 'default' | 'success' | 'warning' | 'info' }> = {
+  DRAFT:     { label: 'Brouillon', variant: 'warning' },
+  VALIDATED: { label: 'Validé',    variant: 'info'    },
+  SENT:      { label: 'Envoyé',    variant: 'success' },
 }
 
 interface MeetingRef {

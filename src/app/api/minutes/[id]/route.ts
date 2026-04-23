@@ -48,6 +48,10 @@ export async function PATCH(
       data: {
         ...(content !== undefined && { content }),
         ...(status !== undefined && { status }),
+        ...(status === 'VALIDATED' && {
+          validatedById: session.user.id,
+          validatedAt: new Date(),
+        }),
       },
     })
     return NextResponse.json(updated)

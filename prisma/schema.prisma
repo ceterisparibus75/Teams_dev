@@ -31,7 +31,7 @@ enum StatutDossier {
 
 enum MinutesStatus {
   DRAFT
-  REVIEWED
+  VALIDATED
   SENT
 }
 
@@ -68,6 +68,7 @@ model User {
   organizedMeetings     Meeting[]
   collaborations        MeetingCollaborator[]
   minutes               MeetingMinutes[]
+  validatedMinutes      MeetingMinutes[]      @relation("ValidatedBy")
   dossiers              Dossier[]
   prompts               Prompt[]
 }
@@ -141,11 +142,14 @@ model MeetingMinutes {
   template   Template?     @relation(fields: [templateId], references: [id])
   promptId   String?
   prompt     Prompt?       @relation(fields: [promptId], references: [id])
-  status     MinutesStatus @default(DRAFT)
-  content    Json
-  sentAt     DateTime?
-  createdAt  DateTime      @default(now())
-  updatedAt  DateTime      @updatedAt
+  status          MinutesStatus @default(DRAFT)
+  content         Json
+  sentAt          DateTime?
+  validatedById   String?
+  validatedAt     DateTime?
+  validatedBy     User?         @relation("ValidatedBy", fields: [validatedById], references: [id])
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
 }
 
 model Template {

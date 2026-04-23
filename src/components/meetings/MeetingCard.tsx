@@ -24,10 +24,10 @@ interface MeetingCardProps {
   triggeringBot?: boolean
 }
 
-const minutesStatusLabel: Record<string, { label: string; variant: 'default' | 'warning' | 'success' }> = {
-  DRAFT:    { label: 'Brouillon',       variant: 'warning' },
-  REVIEWED: { label: 'Prêt à envoyer', variant: 'default' },
-  SENT:     { label: 'Envoyé',          variant: 'success' },
+const minutesStatusLabel: Record<string, { label: string; variant: 'default' | 'warning' | 'success' | 'info' }> = {
+  DRAFT:     { label: 'Brouillon', variant: 'warning' },
+  VALIDATED: { label: 'Validé',    variant: 'info'    },
+  SENT:      { label: 'Envoyé',    variant: 'success' },
 }
 
 const platformLabel: Record<MeetingPlatform, string> = {

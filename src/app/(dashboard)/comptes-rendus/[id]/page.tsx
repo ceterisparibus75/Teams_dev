@@ -2,7 +2,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { toast } from 'sonner'
-import { Download, Send, RefreshCw } from 'lucide-react'
+import { Download, Send, RefreshCw, CheckCircle } from 'lucide-react'
 import { Button, Badge } from '@/components/ui'
 import { SectionEditor } from '@/components/minutes/SectionEditor'
 import { SendModal } from '@/components/minutes/SendModal'
@@ -15,10 +15,10 @@ const DEFAULT_SECTIONS: TemplateSection[] = [
   { id: 'notes',   label: 'Notes complémentaires', type: 'text',  aiGenerated: false },
 ]
 
-const statusConfig: Record<string, { label: string; variant: 'default' | 'warning' | 'success' }> = {
-  DRAFT:    { label: 'Brouillon',       variant: 'warning' },
-  REVIEWED: { label: 'Prêt à envoyer', variant: 'default' },
-  SENT:     { label: 'Envoyé',          variant: 'success' },
+const statusConfig: Record<string, { label: string; variant: 'default' | 'warning' | 'success' | 'info' }> = {
+  DRAFT:     { label: 'Brouillon', variant: 'warning' },
+  VALIDATED: { label: 'Validé',    variant: 'info'    },
+  SENT:      { label: 'Envoyé',    variant: 'success' },
 }
 
 interface MinutesData {
@@ -49,6 +49,7 @@ export default function MinutesDetailPage() {
   const [content, setContent] = useState<MinutesContent | null>(null)
   const [sendOpen, setSendOpen] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [validating, setValidating] = useState(false)
   const [regenerating, setRegenerating] = useState(false)
   const [elapsed, setElapsed] = useState(0)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -68,12 +69,28 @@ export default function MinutesDetailPage() {
       await fetch(`/api/minutes/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: newContent, status: 'REVIEWED' }),
+        body: JSON.stringify({ content: newContent }),
       })
       setSaving(false)
     },
     [id]
   )
+
+  async function handleValidate() {
+    setValidating(true)
+    const res = await fetch(`/api/minutes/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'VALIDATED' }),
+    })
+    if (res.ok) {
+      toast.success('PV validé')
+      setData((prev) => prev ? { ...prev, status: 'VALIDATED' } : prev)
+    } else {
+      toast.error('Erreur lors de la validation')
+    }
+    setValidating(false)
+  }
 
   // Autosave every 30s
   useEffect(() => {
@@ -248,13 +265,24 @@ export default function MinutesDetailPage() {
         ))
       )}
 
-      <div className="flex gap-3 pt-2">
+      <div className="flex gap-3 pt-2 flex-wrap">
         <a href={`/api/export/${id}`} target="_blank" rel="noreferrer">
           <Button variant="outline" className="flex items-center gap-2">
             <Download size={16} /> Télécharger DOCX
           </Button>
         </a>
-        {data.status !== 'SENT' && (
+        {data.status === 'DRAFT' && (
+          <Button
+            onClick={handleValidate}
+            disabled={validating}
+            variant="outline"
+            className="flex items-center gap-2 border-blue-300 text-blue-700 hover:bg-blue-50"
+          >
+            <CheckCircle size={16} />
+            {validating ? 'Validation…' : 'Valider le PV'}
+          </Button>
+        )}
+        {(data.status === 'VALIDATED' || data.status === 'DRAFT') && (
           <Button
             onClick={() => setSendOpen(true)}
             className="flex items-center gap-2"

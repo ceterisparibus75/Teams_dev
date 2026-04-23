@@ -5,10 +5,10 @@ import { formatDateTime } from '@/lib/utils'
 import { Badge } from '@/components/ui'
 import Link from 'next/link'
 
-const statusConfig: Record<string, { label: string; variant: 'default' | 'warning' | 'success' }> = {
-  DRAFT:    { label: 'Brouillon',       variant: 'warning' },
-  REVIEWED: { label: 'Prêt à envoyer', variant: 'default' },
-  SENT:     { label: 'Envoyé',          variant: 'success' },
+const statusConfig: Record<string, { label: string; variant: 'default' | 'warning' | 'success' | 'info' }> = {
+  DRAFT:     { label: 'Brouillon', variant: 'warning' },
+  VALIDATED: { label: 'Validé',    variant: 'info'    },
+  SENT:      { label: 'Envoyé',    variant: 'success' },
 }
 
 export default async function ComptesRendusPage() {
