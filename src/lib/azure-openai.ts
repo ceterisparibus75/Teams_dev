@@ -216,6 +216,9 @@ export function pvContentToMinutesContent(pv: PvContent): MinutesContent {
 
 // ─── Prompt builder (conservé pour les tests unitaires) ───────────────────────
 
+// Limite la transcription pour éviter les réponses vides ou tronquées de Claude
+const MAX_TRANSCRIPT_CHARS = 80_000
+
 export function buildPrompt(
   subject: string,
   transcription: string | null,
@@ -224,8 +227,14 @@ export function buildPrompt(
   const participantsBlock = participants?.length
     ? `\nParticipants identifiés : ${participants.map((p) => p.name).join(', ')}`
     : ''
-  const transcriptionBlock = transcription
-    ? `TRANSCRIPTION DE LA RÉUNION :\n\n${transcription}`
+
+  let safeTranscription = transcription
+  if (safeTranscription && safeTranscription.length > MAX_TRANSCRIPT_CHARS) {
+    safeTranscription = safeTranscription.slice(0, MAX_TRANSCRIPT_CHARS) + '\n[Transcription tronquée — fin non incluse]'
+  }
+
+  const transcriptionBlock = safeTranscription
+    ? `TRANSCRIPTION DE LA RÉUNION :\n\n${safeTranscription}`
     : `Note : aucune transcription disponible. Remplis uniquement ce qui est déductible du sujet et des participants.`
   return `Affaire : "${subject}"${participantsBlock}\n\n${transcriptionBlock}`
 }
@@ -295,8 +304,8 @@ export async function generateMinutesContent(
   let status = 'success'
   let errorMessage: string | undefined
 
-  try {
-    const response = await client.messages.create({
+  const callClaude = () =>
+    client.messages.create({
       model,
       max_tokens: 16000,
       system: systemPrompt,
@@ -305,19 +314,38 @@ export async function generateMinutesContent(
       messages: [{ role: 'user', content: userMessage }],
     })
 
+  const extractToolInput = (response: Awaited<ReturnType<typeof callClaude>>) => {
+    const block = response.content.find((b) => b.type === 'tool_use')
+    if (!block || block.type !== 'tool_use') return null
+    const input = block.input as Record<string, unknown>
+    // Réponse vide : Claude a appelé l'outil sans arguments
+    return Object.keys(input).length >= 2 ? input : null
+  }
+
+  try {
+    let response = await callClaude()
     tokensInput = response.usage.input_tokens
     tokensOutput = response.usage.output_tokens
 
-    const toolUseBlock = response.content.find((b) => b.type === 'tool_use')
-    if (!toolUseBlock || toolUseBlock.type !== 'tool_use') {
-      throw new Error('Aucun bloc tool_use dans la réponse Claude')
+    let toolInput = extractToolInput(response)
+
+    // Retry unique si Claude retourne un input vide ou quasi-vide
+    if (!toolInput) {
+      console.warn('[Claude] Input vide reçu, nouvelle tentative...')
+      response = await callClaude()
+      tokensInput += response.usage.input_tokens
+      tokensOutput += response.usage.output_tokens
+      toolInput = extractToolInput(response)
     }
 
-    const validation = PvContentSchema.safeParse(toolUseBlock.input)
+    if (!toolInput) {
+      throw new Error('Claude a retourné une réponse vide après deux tentatives — aucun champ généré')
+    }
+
+    const validation = PvContentSchema.safeParse(toolInput)
     if (!validation.success) {
       console.warn('[Claude] Zod validation partielle:', validation.error.flatten())
-      // Essaie quand même de construire un résultat partiel
-      const partial = toolUseBlock.input as Partial<PvContent>
+      const partial = toolInput as Partial<PvContent>
       if (partial.resume && partial.sections?.length) {
         const lenientInput = {
           metadata: partial.metadata ?? {
@@ -343,7 +371,10 @@ export async function generateMinutesContent(
         console.error('[Claude] Lenient parse also failed:', lenientValidation.error.flatten())
         throw new Error(`Réponse Claude invalide : ${lenientValidation.error.issues.map(i => i.message).join(', ')}`)
       }
-      throw new Error(`Réponse Claude incomplète : résumé ou sections manquants. Détails : ${validation.error.issues.map(i => `${i.path.join('.')}: ${i.message}`).slice(0, 5).join('; ')}`)
+      throw new Error(
+        `Réponse Claude incomplète — résumé ou sections manquants. ` +
+        `Détails : ${validation.error.issues.map(i => `${i.path.join('.')}: ${i.message}`).slice(0, 3).join('; ')}`
+      )
     }
 
     return pvContentToMinutesContent(validation.data)
