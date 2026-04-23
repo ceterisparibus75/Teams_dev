@@ -4,7 +4,7 @@ import { prisma } from '@/lib/prisma'
 import { MICROSOFT_GRAPH_SCOPES } from '@/lib/microsoft-scopes'
 import { transcribeMedia } from '@/lib/openai-transcription'
 import { encryptToken, decryptToken } from '@/lib/crypto'
-import type { GraphMeeting } from '@/types'
+import type { GraphMeeting, MeetingAttendanceRecord } from '@/types'
 
 type AccessTokenResult =
   | { ok: true; accessToken: string; debug?: string }
@@ -174,6 +174,19 @@ function tokenHasFileReadScope(accessToken: string): boolean {
     scopes.has('Files.Read') ||
     scopes.has('Files.Read.All') ||
     roles.has('Files.Read.All')
+  )
+}
+
+function tokenHasAttendanceArtifactScope(accessToken: string): boolean {
+  const claims = decodeAccessTokenClaims(accessToken)
+  if (!claims) return false
+
+  const scopes = new Set((claims.scp ?? '').split(' ').filter(Boolean))
+  const roles = new Set(claims.roles ?? [])
+
+  return (
+    scopes.has('OnlineMeetingArtifact.Read.All') ||
+    roles.has('OnlineMeetingArtifact.Read.All')
   )
 }
 
@@ -409,6 +422,40 @@ async function graphPostJson<T>(
   }
 
   return JSON.parse(payloadText) as T
+}
+
+async function resolveOnlineMeetingId(
+  accessToken: string,
+  joinUrl: string,
+  userOid?: string
+): Promise<string | null> {
+  const meetingLookup = new URLSearchParams({
+    '$filter': `JoinWebUrl eq '${escapeODataString(joinUrl)}'`,
+  })
+
+  const lookup = await graphGetJson<{ value?: Array<{ id?: string }> }>(
+    accessToken,
+    '/me/onlineMeetings',
+    meetingLookup
+  )
+  const delegatedMeetingId = lookup.value?.[0]?.id
+  if (delegatedMeetingId) return delegatedMeetingId
+
+  if (!userOid) return null
+
+  const appToken = await getAppOnlyToken()
+  if (!appToken) return null
+
+  try {
+    const appLookup = await graphGetJson<{ value?: Array<{ id?: string }> }>(
+      appToken,
+      `/users/${encodeURIComponent(userOid)}/onlineMeetings`,
+      meetingLookup
+    )
+    return appLookup.value?.[0]?.id ?? null
+  } catch {
+    return null
+  }
 }
 
 function simplifyQueryTerm(value: string): string {
@@ -692,6 +739,88 @@ export async function getMeetingsEndedInLastHours(
     return events.filter((ev) => ev.isOnlineMeeting).map(toGraphMeeting)
   } catch (error) {
     console.error('[getMeetingsEndedInLastHours]', error)
+    return []
+  }
+}
+
+interface AttendanceReportRecord {
+  id?: string
+  meetingStartDateTime?: string
+  meetingEndDateTime?: string
+}
+
+interface AttendanceRecordResponse {
+  emailAddress?: string
+  totalAttendanceInSeconds?: number
+  identity?: {
+    displayName?: string
+    user?: { displayName?: string }
+    guest?: { displayName?: string }
+  }
+  attendanceIntervals?: Array<{ joinDateTime?: string; leaveDateTime?: string }>
+}
+
+function toAttendanceRecord(record: AttendanceRecordResponse): MeetingAttendanceRecord | null {
+  const name =
+    record.identity?.displayName ??
+    record.identity?.user?.displayName ??
+    record.identity?.guest?.displayName ??
+    record.emailAddress ??
+    ''
+
+  if (!name.trim() && !record.emailAddress?.trim()) return null
+
+  return {
+    name: name.trim() || record.emailAddress!.trim(),
+    email: record.emailAddress?.trim() || undefined,
+    totalAttendanceInSeconds: record.totalAttendanceInSeconds,
+    intervals: record.attendanceIntervals ?? [],
+  }
+}
+
+export async function getAttendanceRecords(
+  userId: string,
+  joinUrl: string | null | undefined
+): Promise<MeetingAttendanceRecord[]> {
+  if (!joinUrl) return []
+
+  const tokenResult = await getAccessTokenResult(userId)
+  if (!tokenResult.ok) return []
+  if (!tokenHasAttendanceArtifactScope(tokenResult.accessToken)) return []
+
+  try {
+    const tokenClaims = decodeAccessTokenClaims(tokenResult.accessToken)
+    const onlineMeetingId = await resolveOnlineMeetingId(
+      tokenResult.accessToken,
+      joinUrl,
+      tokenClaims?.oid
+    )
+    if (!onlineMeetingId) return []
+
+    const basePath = `/me/onlineMeetings/${encodeURIComponent(onlineMeetingId)}`
+    const reports = await graphGetJson<{ value?: AttendanceReportRecord[] }>(
+      tokenResult.accessToken,
+      `${basePath}/attendanceReports`
+    )
+    const latestReport = [...(reports.value ?? [])]
+      .sort(
+        (a, b) =>
+          new Date(b.meetingEndDateTime ?? b.meetingStartDateTime ?? 0).getTime() -
+          new Date(a.meetingEndDateTime ?? a.meetingStartDateTime ?? 0).getTime()
+      )[0]
+
+    if (!latestReport?.id) return []
+
+    const records = await graphGetJson<{ value?: AttendanceRecordResponse[] }>(
+      tokenResult.accessToken,
+      `${basePath}/attendanceReports/${encodeURIComponent(latestReport.id)}/attendanceRecords`
+    )
+
+    return (records.value ?? [])
+      .map(toAttendanceRecord)
+      .filter((record): record is MeetingAttendanceRecord => Boolean(record))
+  } catch (error) {
+    console.warn('[getAttendanceRecords] Rapport de présence indisponible:', getErrorMessage(error) ?? error)
     return []
   }
 }

@@ -3,7 +3,7 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { generateMinutesContent } from '@/lib/azure-openai'
-import { getTranscriptionResult } from '@/lib/microsoft-graph'
+import { getAttendanceRecords, getTranscriptionResult } from '@/lib/microsoft-graph'
 
 function withDetail(message: string, detail?: string) {
   return detail ? `${message} Détail Graph: ${detail}` : message
@@ -133,11 +133,19 @@ export async function POST(
 
   let content
   try {
+    const attendanceRecords = await getAttendanceRecords(session.user.id, meeting.joinUrl)
     content = await generateMinutesContent(
       meeting.subject,
       transcriptResult.transcription,
       meeting.participants,
-      { userId: session.user.id, minutesId: existingMinutes.id, promptText: customPromptText, modelName: customModelName, meetingDate: meeting.startDateTime ?? undefined }
+      {
+        userId: session.user.id,
+        minutesId: existingMinutes.id,
+        promptText: customPromptText,
+        modelName: customModelName,
+        meetingDate: meeting.startDateTime ?? undefined,
+        attendanceRecords,
+      }
     )
   } catch (genError) {
     const msg = genError instanceof Error ? genError.message : 'Erreur inconnue'

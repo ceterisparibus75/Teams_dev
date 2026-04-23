@@ -2,7 +2,7 @@ import { NextRequest, NextResponse, after } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
-import { getTranscription } from '@/lib/microsoft-graph'
+import { getAttendanceRecords, getTranscription } from '@/lib/microsoft-graph'
 import { generateMinutesContent, createSkeletonContent } from '@/lib/azure-openai'
 import type { Prisma } from '@prisma/client'
 
@@ -94,11 +94,12 @@ export async function POST(
       }
 
       console.log(`[generate/after] Transcription trouvée (${transcription.length} chars) — appel Claude`)
+      const attendanceRecords = await getAttendanceRecords(userId, joinUrl)
       const content = await generateMinutesContent(
         meetingSubject,
         transcription,
         participants,
-        { userId, minutesId, meetingDate: startDateTime ?? undefined }
+        { userId, minutesId, meetingDate: startDateTime ?? undefined, attendanceRecords }
       )
       await prisma.meetingMinutes.update({
         where: { id: minutesId },

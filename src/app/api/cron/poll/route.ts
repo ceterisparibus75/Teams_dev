@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getMeetingsEndedInLastHours, getTranscription } from '@/lib/microsoft-graph'
+import { getAttendanceRecords, getMeetingsEndedInLastHours, getTranscription } from '@/lib/microsoft-graph'
 import { generateMinutesContent } from '@/lib/azure-openai'
 
 // Cooldown in-memory : protège contre les replay attacks (token intercepté)
@@ -89,7 +89,16 @@ export async function GET(req: NextRequest) {
       const transcription = await getTranscription(user.id, gm.joinUrl, {
         subject: gm.subject,
       })
-      const content = await generateMinutesContent(gm.subject, transcription)
+      const attendanceRecords = await getAttendanceRecords(user.id, gm.joinUrl)
+      const content = await generateMinutesContent(
+        gm.subject,
+        transcription,
+        gm.attendees.map((a) => ({
+          name: a.emailAddress.name,
+          email: a.emailAddress.address,
+        })),
+        { userId: user.id, meetingDate: new Date(gm.startDateTime), attendanceRecords }
+      )
 
       await prisma.meetingMinutes.create({
         data: {

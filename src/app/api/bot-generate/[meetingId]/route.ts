@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { generateMinutesContent } from '@/lib/azure-openai'
+import { getAttendanceRecords } from '@/lib/microsoft-graph'
 
 // Rate limiting in-memory : un appel par meetingId toutes les 60 secondes
 const rateLimitMap = new Map<string, number>()
@@ -50,11 +51,12 @@ export async function POST(
 
   const existingMinutes = await prisma.meetingMinutes.findUnique({ where: { meetingId } })
   const defaultTemplate = await prisma.template.findFirst({ where: { isDefault: true } })
+  const attendanceRecords = await getAttendanceRecords(meeting.organizerId, meeting.joinUrl)
   const content = await generateMinutesContent(
     meeting.subject,
     transcript,
     meeting.participants,
-    { meetingDate: meeting.startDateTime ?? undefined }
+    { meetingDate: meeting.startDateTime ?? undefined, attendanceRecords }
   )
 
   if (existingMinutes) {

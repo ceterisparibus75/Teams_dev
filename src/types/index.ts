@@ -29,3 +29,10 @@ export interface GraphMeeting {
   attendees: Array<{ emailAddress: { name: string; address: string } }>
   joinUrl?: string | null
 }
+
+export interface MeetingAttendanceRecord {
+  name: string
+  email?: string
+  totalAttendanceInSeconds?: number
+  intervals: Array<{ joinDateTime?: string; leaveDateTime?: string }>
+}
