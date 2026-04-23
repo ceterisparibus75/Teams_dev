@@ -35,6 +35,18 @@ export async function GET(
   const timedOut = generating && startedAt &&
     (Date.now() - new Date(startedAt).getTime()) > 8 * 60 * 1000
   const actualGenerating = generating && !timedOut
+
+  if (timedOut) {
+    const errorMsg = 'La génération a pris trop de temps. Cliquez sur "Régénérer le procès-verbal" pour réessayer.'
+    await prisma.meetingMinutes.update({
+      where: { id },
+      data: {
+        isGenerating: false,
+        content: { ...raw, _generating: false, _generationError: errorMsg } as import('@prisma/client').Prisma.InputJsonValue,
+      },
+    })
+  }
+
   const generationError = timedOut
     ? 'La génération a pris trop de temps. Cliquez sur "Régénérer le procès-verbal" pour réessayer.'
     : (typeof raw?._generationError === 'string' ? raw._generationError : null)

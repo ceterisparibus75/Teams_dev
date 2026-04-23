@@ -288,9 +288,10 @@ export function createSkeletonContent(
 // ─── Prompt builder (conservé pour les tests unitaires) ───────────────────────
 
 // Transcription tronquée pour rester dans un budget de tokens raisonnable.
-// Stratégie début+fin : on conserve l'ouverture (contexte, participants, enjeux)
-// et la clôture (décisions, actions, prochaine réunion).
-const MAX_HEAD_CHARS = 50_000
+// Stratégie début+milieu+fin : ouverture (contexte, enjeux) + sample du milieu (discussions)
+// + clôture (décisions, actions, prochaine réunion).
+const MAX_HEAD_CHARS = 40_000
+const MAX_MIDDLE_CHARS = 10_000
 const MAX_TAIL_CHARS = 10_000
 
 export function buildPrompt(
@@ -315,10 +316,16 @@ export function buildPrompt(
     : ''
 
   let safeTranscription = transcription
-  if (safeTranscription && safeTranscription.length > MAX_HEAD_CHARS + MAX_TAIL_CHARS) {
+  if (safeTranscription && safeTranscription.length > MAX_HEAD_CHARS + MAX_MIDDLE_CHARS + MAX_TAIL_CHARS) {
     const head = safeTranscription.slice(0, MAX_HEAD_CHARS)
+    const middleStart = Math.floor((safeTranscription.length - MAX_MIDDLE_CHARS) / 2)
+    const middle = safeTranscription.slice(middleStart, middleStart + MAX_MIDDLE_CHARS)
     const tail = safeTranscription.slice(-MAX_TAIL_CHARS)
-    safeTranscription = `${head}\n\n[… ${(safeTranscription.length - MAX_HEAD_CHARS - MAX_TAIL_CHARS).toLocaleString('fr')} caractères omis …]\n\n${tail}`
+    const omitted1 = middleStart - MAX_HEAD_CHARS
+    const omitted2 = safeTranscription.length - MAX_TAIL_CHARS - (middleStart + MAX_MIDDLE_CHARS)
+    safeTranscription =
+      `${head}\n\n[… ${omitted1.toLocaleString('fr')} caractères omis …]\n\n` +
+      `${middle}\n\n[… ${omitted2.toLocaleString('fr')} caractères omis …]\n\n${tail}`
   }
 
   const transcriptionBlock = safeTranscription

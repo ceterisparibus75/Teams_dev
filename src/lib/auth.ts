@@ -2,6 +2,7 @@ import { NextAuthOptions } from 'next-auth'
 import AzureADProvider from 'next-auth/providers/azure-ad'
 import { prisma } from '@/lib/prisma'
 import { MICROSOFT_AUTHORIZATION_SCOPE } from '@/lib/microsoft-scopes'
+import { encryptToken } from '@/lib/crypto'
 
 export const authOptions: NextAuthOptions = {
   providers: [
@@ -35,8 +36,8 @@ export const authOptions: NextAuthOptions = {
             update: {
               name: token.name ?? '',
               microsoftId: oid,
-              microsoftAccessToken: account.access_token ?? null,
-              microsoftRefreshToken: account.refresh_token ?? null,
+              microsoftAccessToken: account.access_token ? encryptToken(account.access_token) : null,
+              microsoftRefreshToken: account.refresh_token ? encryptToken(account.refresh_token) : null,
               microsoftTokenExpiry: account.expires_at
                 ? new Date(account.expires_at * 1000)
                 : null,
@@ -45,8 +46,8 @@ export const authOptions: NextAuthOptions = {
               email: token.email!,
               name: token.name ?? '',
               microsoftId: oid,
-              microsoftAccessToken: account.access_token ?? null,
-              microsoftRefreshToken: account.refresh_token ?? null,
+              microsoftAccessToken: account.access_token ? encryptToken(account.access_token) : null,
+              microsoftRefreshToken: account.refresh_token ? encryptToken(account.refresh_token) : null,
               microsoftTokenExpiry: account.expires_at
                 ? new Date(account.expires_at * 1000)
                 : null,

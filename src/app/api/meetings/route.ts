@@ -107,7 +107,7 @@ export async function GET(req: NextRequest) {
         botStatus: true,
         botScheduledAt: true,
         participants: { select: { name: true, email: true } },
-        minutes: { select: { id: true, status: true, isGenerating: true } },
+        minutes: { select: { id: true, status: true, isGenerating: true, updatedAt: true } },
       },
       orderBy: { startDateTime: 'desc' },
       take: 30,
@@ -149,7 +149,8 @@ export async function GET(req: NextRequest) {
         minutes: m.minutes ? {
           id: m.minutes.id,
           status: m.minutes.status,
-          generating: m.minutes.isGenerating,
+          generating: m.minutes.isGenerating &&
+            (Date.now() - new Date(m.minutes.updatedAt).getTime()) < 15 * 60 * 1000,
         } : null,
       }))
     )

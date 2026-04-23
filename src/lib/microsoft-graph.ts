@@ -3,6 +3,7 @@ import { ConfidentialClientApplication } from '@azure/msal-node'
 import { prisma } from '@/lib/prisma'
 import { MICROSOFT_GRAPH_SCOPES } from '@/lib/microsoft-scopes'
 import { transcribeMedia } from '@/lib/openai-transcription'
+import { encryptToken, decryptToken } from '@/lib/crypto'
 import type { GraphMeeting } from '@/types'
 
 type AccessTokenResult =
@@ -245,12 +246,15 @@ async function getAccessTokenResult(userId: string): Promise<AccessTokenResult> 
     return { ok: false, reason: 'missing_connection' }
   }
 
+  const refreshToken = decryptToken(user.microsoftRefreshToken)
+
   if (user.microsoftAccessToken && user.microsoftTokenExpiry) {
     if (Date.now() < new Date(user.microsoftTokenExpiry).getTime() - 5 * 60 * 1000) {
+      const accessToken = decryptToken(user.microsoftAccessToken)
       return {
         ok: true,
-        accessToken: user.microsoftAccessToken,
-        debug: buildTokenDebug(user.microsoftAccessToken),
+        accessToken,
+        debug: buildTokenDebug(accessToken),
       }
     }
   }
@@ -265,7 +269,7 @@ async function getAccessTokenResult(userId: string): Promise<AccessTokenResult> 
 
   try {
     const result = await cca.acquireTokenByRefreshToken({
-      refreshToken: user.microsoftRefreshToken,
+      refreshToken,
       scopes: [...MICROSOFT_GRAPH_SCOPES],
     })
     if (!result?.accessToken) {
@@ -275,7 +279,7 @@ async function getAccessTokenResult(userId: string): Promise<AccessTokenResult> 
     await prisma.user.update({
       where: { id: userId },
       data: {
-        microsoftAccessToken: result.accessToken,
+        microsoftAccessToken: encryptToken(result.accessToken),
         microsoftTokenExpiry: result.expiresOn ?? new Date(Date.now() + 3600 * 1000),
       },
     })
