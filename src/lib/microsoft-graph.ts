@@ -22,6 +22,7 @@ export type TranscriptionResult =
         | 'missing_connection'
         | 'reauth_required'
         | 'permission_denied'
+        | 'policy_denied'
         | 'meeting_not_found'
         | 'transcript_not_found'
         | 'transcript_empty'
@@ -47,6 +48,62 @@ interface DriveItemLike {
     webUrl?: string
     parentReference?: { driveId?: string; path?: string }
     file?: { mimeType?: string }
+  }
+}
+
+// ─── App-only token (client credentials) ──────────────────────────────────
+
+async function getAppOnlyToken(): Promise<string | null> {
+  try {
+    const cca = new ConfidentialClientApplication({
+      auth: {
+        clientId: process.env.AZURE_AD_CLIENT_ID!,
+        clientSecret: process.env.AZURE_AD_CLIENT_SECRET!,
+        authority: `https://login.microsoftonline.com/${process.env.AZURE_AD_TENANT_ID}`,
+      },
+    })
+    const result = await cca.acquireTokenByClientCredential({
+      scopes: ['https://graph.microsoft.com/.default'],
+    })
+    return result?.accessToken ?? null
+  } catch {
+    return null
+  }
+}
+
+async function fetchTranscriptWithAppToken(
+  userOid: string,
+  onlineMeetingId: string
+): Promise<string | null> {
+  const appToken = await getAppOnlyToken()
+  if (!appToken) return null
+
+  const basePath = `/users/${encodeURIComponent(userOid)}/onlineMeetings/${encodeURIComponent(onlineMeetingId)}`
+
+  let transcripts: { value?: Array<{ id?: string; createdDateTime?: string }> }
+  try {
+    transcripts = await graphGetJson(appToken, `${basePath}/transcripts`)
+  } catch {
+    return null
+  }
+
+  if (!transcripts.value?.length) return null
+
+  const latest = [...transcripts.value].sort(
+    (a, b) =>
+      new Date(b.createdDateTime ?? 0).getTime() - new Date(a.createdDateTime ?? 0).getTime()
+  )[0]
+  if (!latest?.id) return null
+
+  try {
+    const content = await graphGetText(
+      appToken,
+      `${basePath}/transcripts/${encodeURIComponent(latest.id)}/content`,
+      new URLSearchParams({ '$format': 'text/vtt' })
+    )
+    return parseTranscriptText(content)
+  } catch {
+    return null
   }
 }
 
@@ -742,13 +799,37 @@ export async function getTranscriptionResult(
       '$filter': `JoinWebUrl eq '${escapedJoinUrl}'`,
     })
 
-    // Resolve joinUrl → online meeting ID
-    const lookup = await graphGetJson<{ value?: Array<{ id?: string }> }>(
+    // Resolve joinUrl → online meeting ID (delegated token first, app-only fallback)
+    let lookup = await graphGetJson<{ value?: Array<{ id?: string }> }>(
       tokenResult.accessToken,
       '/me/onlineMeetings',
       meetingLookup
     )
-    const onlineMeetingId = lookup.value?.[0]?.id
+    let onlineMeetingId = lookup.value?.[0]?.id
+
+    // If not found via delegated token (user is not organizer), try with app-only token
+    if (!onlineMeetingId && tokenOid) {
+      const appToken = await getAppOnlyToken()
+      if (appToken) {
+        try {
+          const appLookup = await graphGetJson<{ value?: Array<{ id?: string }> }>(
+            appToken,
+            `/users/${encodeURIComponent(tokenOid)}/onlineMeetings`,
+            meetingLookup
+          )
+          onlineMeetingId = appLookup.value?.[0]?.id
+          // If found with app token, fetch transcript directly
+          if (onlineMeetingId) {
+            const appTranscript = await fetchTranscriptWithAppToken(tokenOid, onlineMeetingId)
+            if (appTranscript) return { ok: true, transcription: appTranscript }
+            return { ok: false, reason: 'transcript_not_found' }
+          }
+        } catch {
+          // ignore, fall through to meeting_not_found
+        }
+      }
+    }
+
     if (!onlineMeetingId) return { ok: false, reason: 'meeting_not_found' }
 
     const transcriptCandidates = [
@@ -789,9 +870,13 @@ export async function getTranscriptionResult(
     if (!transcripts) {
       const detail = mergeDebug(transcriptErrors.join(' || '), tokenResult.debug)
       if (transcriptErrors.some((entry) => isForbiddenDetail(entry))) {
+        if (tokenOid) {
+          const appTranscript = await fetchTranscriptWithAppToken(tokenOid, onlineMeetingId)
+          if (appTranscript) return { ok: true, transcription: appTranscript }
+        }
         const fallbackResult = await tryFileFallback(detail)
         if (fallbackResult) return fallbackResult
-        return { ok: false, reason: 'permission_denied', detail }
+        return { ok: false, reason: 'policy_denied', detail }
       }
       return { ok: false, reason: 'graph_error', detail }
     }
@@ -846,9 +931,13 @@ export async function getTranscriptionResult(
     if (!content) {
       const detail = mergeDebug(contentErrors.join(' || '), tokenResult.debug)
       if (contentErrors.some((entry) => isForbiddenDetail(entry))) {
+        if (tokenOid) {
+          const appTranscript = await fetchTranscriptWithAppToken(tokenOid, onlineMeetingId)
+          if (appTranscript) return { ok: true, transcription: appTranscript }
+        }
         const fallbackResult = await tryFileFallback(detail)
         if (fallbackResult) return fallbackResult
-        return { ok: false, reason: 'permission_denied', detail }
+        return { ok: false, reason: 'policy_denied', detail }
       }
       return { ok: false, reason: 'graph_error', detail }
     }

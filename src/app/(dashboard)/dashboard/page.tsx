@@ -3,12 +3,16 @@ import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { useRouter } from 'next/navigation'
 import { MeetingCard } from '@/components/meetings/MeetingCard'
+import type { MeetingPlatform, BotStatus } from '@prisma/client'
 
 interface MeetingData {
   id: string
   subject: string
   startDateTime: string
+  endDateTime: string
   hasTranscription: boolean
+  platform: MeetingPlatform
+  botStatus: BotStatus | null
   participants: Array<{ name: string; email: string }>
   minutes?: { id: string; status: string } | null
 }
@@ -70,6 +74,7 @@ export default function DashboardPage() {
               key={m.id}
               meeting={m}
               onGenerate={handleGenerate}
+              onTriggerBot={() => {}}
               generating={generating === m.id}
             />
           ))}
@@ -88,6 +93,7 @@ export default function DashboardPage() {
               key={m.id}
               meeting={m}
               onGenerate={handleGenerate}
+              onTriggerBot={() => {}}
               generating={generating === m.id}
             />
           ))

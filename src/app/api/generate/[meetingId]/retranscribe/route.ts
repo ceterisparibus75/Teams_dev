@@ -31,7 +31,15 @@ function buildTranscriptionError(result: Exclude<Awaited<ReturnType<typeof getTr
       return {
         status: 403,
         error: withDetail(
-          'Microsoft Graph refuse l’accès aux transcriptions. Vérifiez que la permission Azure "OnlineMeetingTranscript.Read.All" a bien été ajoutée et consentie.',
+          "La permission OnlineMeetingTranscript.Read.All est absente de votre session. Deconnectez-vous puis reconnectez-vous pour que la nouvelle permission soit prise en compte.",
+          result.detail
+        ),
+      }
+    case 'policy_denied':
+      return {
+        status: 403,
+        error: withDetail(
+          "Microsoft Graph refuse l'acces aux transcriptions malgre la permission presente. Verifiez le consentement administrateur dans Azure AD (Applications d'entreprise > votre app > Autorisations > Accorder le consentement) et que la transcription est activee dans Teams Admin Center.",
           result.detail
         ),
       }
@@ -51,7 +59,7 @@ function buildTranscriptionError(result: Exclude<Awaited<ReturnType<typeof getTr
       return {
         status: 422,
         error:
-          'La transcription Teams a été trouvée mais son contenu est vide pour l’instant. Réessayez dans quelques minutes.',
+          "La transcription Teams a été trouvée mais son contenu est vide pour l'instant. Réessayez dans quelques minutes.",
       }
     case 'missing_join_url':
       return {
