@@ -101,7 +101,7 @@ export async function GET(req: NextRequest) {
         botStatus: true,
         botScheduledAt: true,
         participants: { select: { name: true, email: true } },
-        minutes: { select: { id: true, status: true } },
+        minutes: { select: { id: true, status: true, content: true } },
       },
       orderBy: { startDateTime: 'desc' },
       take: 30,
@@ -140,6 +140,11 @@ export async function GET(req: NextRequest) {
       meetings.map(({ joinUrl: _joinUrl, ...m }) => ({
         ...m,
         hasTranscription: updatedIds.has(m.id) ? true : m.hasTranscription,
+        minutes: m.minutes ? {
+          id: m.minutes.id,
+          status: m.minutes.status,
+          generating: (m.minutes.content as Record<string, unknown>)?._generating === true,
+        } : null,
       }))
     )
   } catch (error) {

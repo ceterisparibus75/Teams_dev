@@ -137,7 +137,11 @@ export default function DossierDetailPage() {
         return
       }
       const data = await res.json()
-      toast.success('Compte rendu généré')
+      if (data.generating) {
+        toast.success('Génération lancée — Claude rédige en arrière-plan')
+      } else {
+        toast.success('Compte rendu créé')
+      }
       router.push(`/comptes-rendus/${data.id}`)
     } finally {
       setGeneratingId(null)

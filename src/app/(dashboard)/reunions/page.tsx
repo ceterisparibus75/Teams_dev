@@ -15,7 +15,7 @@ interface MeetingData {
   botStatus: BotStatus | null
   botScheduledAt: string | null
   participants: Array<{ name: string; email: string }>
-  minutes?: { id: string; status: string } | null
+  minutes?: { id: string; status: string; generating: boolean } | null
 }
 
 export default function ReunionsPage() {
@@ -71,7 +71,11 @@ export default function ReunionsPage() {
         return
       }
       const data = await res.json()
-      toast.success('Compte rendu généré')
+      if (data.generating) {
+        toast.success('Génération lancée — Claude rédige en arrière-plan')
+      } else {
+        toast.success('Compte rendu créé')
+      }
       router.push(`/comptes-rendus/${data.id}`)
     } finally {
       setGenerating(null)

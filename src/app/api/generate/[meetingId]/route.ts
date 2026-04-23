@@ -1,25 +1,27 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse, after } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { getTranscription } from '@/lib/microsoft-graph'
 import { generateMinutesContent, createSkeletonContent } from '@/lib/azure-openai'
+import type { Prisma } from '@prisma/client'
 
 export async function POST(
-  req: NextRequest,
+  _req: NextRequest,
   { params }: { params: Promise<{ meetingId: string }> }
 ) {
   const session = await getServerSession(authOptions)
   if (!session?.user?.id) return NextResponse.json({ error: 'Non autorisé' }, { status: 401 })
 
   const { meetingId } = await params
+  const userId = session.user.id
 
   const meeting = await prisma.meeting.findFirst({
     where: {
       id: meetingId,
       OR: [
-        { organizerId: session.user.id },
-        { collaborators: { some: { userId: session.user.id } } },
+        { organizerId: userId },
+        { collaborators: { some: { userId } } },
       ],
     },
     include: { participants: true },
@@ -27,62 +29,85 @@ export async function POST(
   if (!meeting) return NextResponse.json({ error: 'Réunion introuvable' }, { status: 404 })
 
   const existingMinutes = await prisma.meetingMinutes.findUnique({ where: { meetingId } })
-
   const defaultTemplate = await prisma.template.findFirst({ where: { isDefault: true } })
-  const transcription = await getTranscription(session.user.id, meeting.joinUrl, {
-    subject: meeting.subject,
-  })
+  const transcription = await getTranscription(userId, meeting.joinUrl, { subject: meeting.subject })
 
-  // Mettre à jour hasTranscription AVANT la génération (indépendant du succès Claude)
   await prisma.meeting.update({
     where: { id: meetingId },
     data: { hasTranscription: !!transcription, processedAt: new Date() },
   })
 
-  let content
   if (!transcription) {
-    // Pas de transcription disponible — squelette à compléter manuellement
-    content = createSkeletonContent(meeting.subject, meeting.participants, meeting.startDateTime)
-  } else {
-    try {
-      content = await generateMinutesContent(
-        meeting.subject,
-        transcription,
-        meeting.participants,
-        { userId: session.user.id, minutesId: existingMinutes?.id }
-      )
-    } catch (genError) {
-      const msg = genError instanceof Error ? genError.message : 'Erreur inconnue'
-      console.error('[generate] Claude generation failed:', genError)
-      // Fallback sur squelette plutôt que d'échouer complètement
-      if (msg.includes('réponse vide')) {
-        content = createSkeletonContent(meeting.subject, meeting.participants, meeting.startDateTime)
-      } else {
-        return NextResponse.json(
-          { error: `La génération Claude a échoué : ${msg}`, code: 'generation_error' },
-          { status: 502 }
-        )
-      }
+    // Pas de transcription — squelette immédiat, pas de tâche en arrière-plan
+    const content = createSkeletonContent(meeting.subject, meeting.participants, meeting.startDateTime)
+    if (existingMinutes) {
+      await prisma.meetingMinutes.update({
+        where: { meetingId },
+        data: { content: content as unknown as Prisma.InputJsonValue },
+      })
+      return NextResponse.json({ ...existingMinutes, content })
     }
-  }
-
-  if (existingMinutes) {
-    await prisma.meetingMinutes.update({
-      where: { meetingId },
-      data: { content: content as unknown as import('@prisma/client').Prisma.InputJsonValue },
+    const minutes = await prisma.meetingMinutes.create({
+      data: {
+        meetingId,
+        authorId: userId,
+        templateId: defaultTemplate?.id ?? null,
+        content: content as unknown as Prisma.InputJsonValue,
+        status: 'DRAFT',
+      },
     })
-    return NextResponse.json({ ...existingMinutes, content })
+    return NextResponse.json(minutes)
   }
 
-  const minutes = await prisma.meetingMinutes.create({
-    data: {
-      meetingId,
-      authorId: session.user.id,
-      templateId: defaultTemplate?.id ?? null,
-      content: content as unknown as import('@prisma/client').Prisma.InputJsonValue,
-      status: 'DRAFT',
-    },
+  // Transcription disponible — sauvegarde du squelette avec flag _generating, Claude tourne en fond
+  const skeleton = createSkeletonContent(meeting.subject, meeting.participants, meeting.startDateTime)
+  const skeletonWithFlag = { ...(skeleton as object), _generating: true } as Prisma.InputJsonValue
+
+  let savedMinutes
+  if (existingMinutes) {
+    savedMinutes = await prisma.meetingMinutes.update({
+      where: { meetingId },
+      data: { content: skeletonWithFlag },
+    })
+  } else {
+    savedMinutes = await prisma.meetingMinutes.create({
+      data: {
+        meetingId,
+        authorId: userId,
+        templateId: defaultTemplate?.id ?? null,
+        content: skeletonWithFlag,
+        status: 'DRAFT',
+      },
+    })
+  }
+
+  const minutesId = savedMinutes.id
+  const meetingSubject = meeting.subject
+  const participants = meeting.participants
+  const startDateTime = meeting.startDateTime
+
+  after(async () => {
+    try {
+      const content = await generateMinutesContent(
+        meetingSubject,
+        transcription,
+        participants,
+        { userId, minutesId }
+      )
+      await prisma.meetingMinutes.update({
+        where: { id: minutesId },
+        data: { content: { ...(content as object), _generating: false } as Prisma.InputJsonValue },
+      })
+      console.log(`[generate/after] ✓ CR généré — meetingId=${meetingId} minutesId=${minutesId}`)
+    } catch (error) {
+      console.error('[generate/after] Échec génération Claude:', error)
+      const fallback = createSkeletonContent(meetingSubject, participants, startDateTime)
+      await prisma.meetingMinutes.update({
+        where: { id: minutesId },
+        data: { content: { ...(fallback as object), _generating: false } as Prisma.InputJsonValue },
+      })
+    }
   })
 
-  return NextResponse.json(minutes)
+  return NextResponse.json({ ...savedMinutes, content: skeletonWithFlag, generating: true })
 }

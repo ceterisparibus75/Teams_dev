@@ -2,7 +2,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { toast } from 'sonner'
-import { Download, Send, RefreshCw, CheckCircle, ChevronDown, ChevronUp } from 'lucide-react'
+import { Download, Send, RefreshCw, CheckCircle, ChevronDown, ChevronUp, Loader2 } from 'lucide-react'
 import { Button, Badge } from '@/components/ui'
 import { SectionEditor } from '@/components/minutes/SectionEditor'
 import { SendModal } from '@/components/minutes/SendModal'
@@ -59,8 +59,10 @@ export default function MinutesDetailPage() {
   const [saving, setSaving] = useState(false)
   const [validating, setValidating] = useState(false)
   const [regenerating, setRegenerating] = useState(false)
+  const [generating, setGenerating] = useState(false)
   const [elapsed, setElapsed] = useState(0)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   // Panel de personnalisation IA
   const [showPromptPanel, setShowPromptPanel] = useState(false)
@@ -77,9 +79,31 @@ export default function MinutesDetailPage() {
         if (!d.content) { setLoadError('Le contenu de ce compte rendu est vide ou corrompu.'); return }
         setData(d as MinutesData)
         setContent(d.content as MinutesContent)
+        setGenerating(d.generating === true)
       })
       .catch(() => setLoadError('Impossible de charger le compte rendu.'))
   }, [id])
+
+  // Polling toutes les 15 s quand Claude génère en arrière-plan
+  useEffect(() => {
+    if (!generating) return
+    pollingRef.current = setInterval(async () => {
+      try {
+        const r = await fetch(`/api/minutes/${id}`)
+        const d = await r.json()
+        if (!r.ok || d.generating !== true) {
+          clearInterval(pollingRef.current!)
+          setGenerating(false)
+          if (r.ok && d.content) {
+            setData(d as MinutesData)
+            setContent(d.content as MinutesContent)
+            toast.success('Compte rendu généré par Claude !')
+          }
+        }
+      } catch { /* silencieux */ }
+    }, 15_000)
+    return () => { if (pollingRef.current) clearInterval(pollingRef.current) }
+  }, [generating, id])
 
   const save = useCallback(
     async (newContent: MinutesContent) => {
@@ -309,7 +333,16 @@ export default function MinutesDetailPage() {
         </div>
       )}
 
-      {content.notes?.includes('sans transcription') && (
+      {generating && (
+        <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 text-sm text-blue-800 flex items-center gap-2.5">
+          <Loader2 size={14} className="animate-spin shrink-0" />
+          <span>
+            <strong>Génération en cours par Claude…</strong> Vous pouvez quitter cette page et revenir plus tard, le compte rendu sera prêt à votre retour.
+          </span>
+        </div>
+      )}
+
+      {!generating && content.notes?.includes('sans transcription') && (
         <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-800">
           <strong>Aucune transcription Teams disponible</strong> — ce brouillon a été créé avec un contenu vide à compléter manuellement.
           Pour générer un vrai procès-verbal, démarrez la transcription dans la réunion Teams puis cliquez sur <strong>Régénérer le procès-verbal</strong>.
