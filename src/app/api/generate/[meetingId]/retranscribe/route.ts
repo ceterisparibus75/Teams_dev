@@ -122,12 +122,22 @@ export async function POST(
     )
   }
 
-  const content = await generateMinutesContent(
-    meeting.subject,
-    transcriptResult.transcription,
-    meeting.participants,
-    { userId: session.user.id, minutesId: existingMinutes.id }
-  )
+  let content
+  try {
+    content = await generateMinutesContent(
+      meeting.subject,
+      transcriptResult.transcription,
+      meeting.participants,
+      { userId: session.user.id, minutesId: existingMinutes.id }
+    )
+  } catch (genError) {
+    const msg = genError instanceof Error ? genError.message : 'Erreur inconnue'
+    console.error('[retranscribe] Claude generation failed:', genError)
+    return NextResponse.json(
+      { error: `La génération Claude a échoué : ${msg}`, code: 'generation_error' },
+      { status: 502 }
+    )
+  }
 
   await prisma.meetingMinutes.update({
     where: { meetingId },

@@ -346,7 +346,7 @@ export async function generateMinutesContent(
     status = 'error'
     errorMessage = error instanceof Error ? error.message : String(error)
     console.error('[Claude] Generation failed:', error)
-    return { ...DEFAULT_CONTENT }
+    throw error  // On propage l'erreur — ne jamais écraser silencieusement un contenu existant
   } finally {
     if (options?.userId) {
       const transcriptHash = createHash('sha256')
