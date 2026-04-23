@@ -61,14 +61,17 @@ ${MODELE_PV}
 # RÈGLES PAR CHAMP
 
 sections : 4 à 8 sections thématiques. Aucun gras, italique, astérisque, sous-numérotation alphabétique. Paragraphes séparés par \\n\\n, listes par \\n- .
-participants : tableau exhaustif avec catégorie (debiteur, conseil_debiteur, partenaire_bancaire, conseil_partenaire, auditeur_expert, mandataire_judiciaire, administrateur_judiciaire, actionnaire, repreneur, autre). Inclure TOUS les participants listés dans l'invitation, qu'ils soient présents ou absents.
+participants : tableau exhaustif avec catégorie (debiteur, conseil_debiteur, partenaire_bancaire, conseil_partenaire, auditeur_expert, mandataire_ad_hoc, conciliateur, administrateur_judiciaire, mandataire_judiciaire, actionnaire, repreneur, autre). Inclure TOUS les participants listés dans l'invitation, qu'ils soient présents ou absents.
 Présence — règles strictes :
 - 'Visioconférence' : participant actif en visio (a pris la parole ou sa présence est confirmée en visio)
 - 'Présentiel' : participant actif en salle
 - 'Téléphonique' : participant actif par téléphone
 - 'Absent' : invité à la réunion mais absent ou excusé (n'a pas participé aux échanges)
 Un participant présent mais qui ne prend pas la parole conserve son mode de présence (Visioconférence/Présentiel/Téléphonique) — seule l'absence totale justifie la valeur 'Absent'.
-⚠ RÈGLE ABSOLUE : Les membres de BL & Associés ne peuvent JAMAIS être catégorisés 'conseil_debiteur'. BL & Associés est le cabinet mandataire : ses membres sont exclusivement 'mandataire_judiciaire' ou 'administrateur_judiciaire' selon la procédure en cours (jamais 'conseil_debiteur', jamais 'conseil_partenaire').
+⚠ RÈGLE ABSOLUE : Les membres de BL & Associés ne peuvent JAMAIS être catégorisés 'conseil_debiteur' ou 'conseil_partenaire'. BL & Associés est le cabinet mandataire — selon la procédure :
+- Mandat ad hoc → catégorie 'mandataire_ad_hoc'
+- Conciliation → catégorie 'conciliateur'
+- Redressement judiciaire ou Sauvegarde → catégorie 'administrateur_judiciaire'
 actions : verbe à l'infinitif + objet précis, responsable avec entité entre parenthèses, échéance en français complet.
 prochaine_reunion : ne renseigne que si explicitement mentionnée.
 points_vigilance et precisions_a_apporter : réservés aux éléments ambigus ou sensibles.`
@@ -110,8 +113,8 @@ const GENERER_PV_TOOL: Anthropic.Tool = {
               type: 'string',
               enum: [
                 'debiteur', 'conseil_debiteur', 'partenaire_bancaire', 'conseil_partenaire',
-                'auditeur_expert', 'mandataire_judiciaire', 'administrateur_judiciaire',
-                'actionnaire', 'repreneur', 'autre',
+                'auditeur_expert', 'mandataire_ad_hoc', 'conciliateur', 'administrateur_judiciaire',
+                'mandataire_judiciaire', 'actionnaire', 'repreneur', 'autre',
               ],
             },
           },

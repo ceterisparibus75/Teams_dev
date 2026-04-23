@@ -87,19 +87,21 @@ const DEFAULT_TEMPLATE: TemplateConfig = {
 // ─── Catégories de participants ───────────────────────────────────────────────
 
 const CATEGORIE_ORDER = [
+  'mandataire_ad_hoc', 'conciliateur', 'administrateur_judiciaire', 'mandataire_judiciaire',
   'debiteur', 'conseil_debiteur', 'partenaire_bancaire', 'conseil_partenaire',
   'auditeur_expert', 'actionnaire', 'repreneur', 'autre',
-  'mandataire_judiciaire', 'administrateur_judiciaire',
 ]
 
 const CATEGORIE_LABELS: Record<string, string> = {
+  mandataire_ad_hoc: 'Mandataire ad hoc',
+  conciliateur: 'Conciliateur',
+  administrateur_judiciaire: 'Administrateur judiciaire',
+  mandataire_judiciaire: 'Mandataire judiciaire',
   debiteur: 'Débiteur',
   conseil_debiteur: 'Conseil du débiteur',
   partenaire_bancaire: 'Partenaires bancaires',
   conseil_partenaire: 'Conseil des partenaires bancaires',
   auditeur_expert: 'Auditeurs et experts',
-  mandataire_judiciaire: 'Mandataire judiciaire',
-  administrateur_judiciaire: 'Administrateur judiciaire',
   actionnaire: 'Actionnaires',
   repreneur: 'Repreneurs potentiels',
   autre: 'Autres participants',
