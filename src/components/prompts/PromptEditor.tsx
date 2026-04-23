@@ -34,11 +34,34 @@ interface Props {
   onCancel: () => void
 }
 
+function parseTestParticipants(raw: string): Array<{ name: string; email?: string; company?: string }> {
+  return raw
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const emailMatch = line.match(/<([^>]+)>/)
+      const email = emailMatch?.[1]?.trim()
+      const normalized = line.replace(/\s*<[^>]+>\s*/, ' ').trim()
+      const [namePart, ...companyParts] = normalized.split(/\s+[—–]\s+|\s+-\s+/)
+      const name = namePart?.trim() ?? ''
+      const company = companyParts.join(' — ').trim() || undefined
+      return {
+        name,
+        email: email || undefined,
+        company,
+      }
+    })
+    .filter((participant) => participant.name.length > 0)
+}
+
 export function PromptEditor({ initial, onSaved, onCancel }: Props) {
   const [form, setForm] = useState<PromptFormData>({ ...DEFAULT_FORM, ...initial })
   const [saving, setSaving] = useState(false)
   const [testOpen, setTestOpen] = useState(false)
   const [testSujet, setTestSujet] = useState('')
+  const [testMeetingDate, setTestMeetingDate] = useState('')
+  const [testParticipants, setTestParticipants] = useState('')
   const [testTranscription, setTestTranscription] = useState('')
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<MinutesContent | null>(null)
@@ -68,6 +91,7 @@ export function PromptEditor({ initial, onSaved, onCancel }: Props) {
       toast.error('Veuillez renseigner le sujet et la transcription de test')
       return
     }
+    const parsedParticipants = parseTestParticipants(testParticipants)
     setTesting(true)
     setTestResult(null)
     const res = await fetch('/api/prompts/test', {
@@ -78,6 +102,8 @@ export function PromptEditor({ initial, onSaved, onCancel }: Props) {
         transcription: testTranscription,
         promptText: form.contenu || undefined,
         modeleClaude: form.modeleClaude,
+        participants: parsedParticipants.length ? parsedParticipants : undefined,
+        meetingDate: testMeetingDate || undefined,
       }),
     })
     setTesting(false)
@@ -181,6 +207,39 @@ export function PromptEditor({ initial, onSaved, onCancel }: Props) {
                 placeholder="ex. Réunion créanciers — Société ABC SAS"
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
+            </div>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <div className="space-y-1">
+                <label className="block text-sm font-medium text-gray-700" htmlFor="test-meeting-date">
+                  Date de la réunion
+                </label>
+                <input
+                  id="test-meeting-date"
+                  type="datetime-local"
+                  value={testMeetingDate}
+                  onChange={(e) => setTestMeetingDate(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <p className="text-xs text-gray-500">
+                  Optionnel, mais recommandé pour reproduire le contexte réel.
+                </p>
+              </div>
+              <div className="space-y-1">
+                <label className="block text-sm font-medium text-gray-700" htmlFor="test-participants">
+                  Participants (format Teams)
+                </label>
+                <textarea
+                  id="test-participants"
+                  value={testParticipants}
+                  onChange={(e) => setTestParticipants(e.target.value)}
+                  rows={4}
+                  placeholder={`Maxime Langet <maxime.langet@bl-aj.fr> — SELAS BL & Associés\nKarim Bent-Mohamed <kbm@ikki-partners.com> — Ikki Partners`}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y"
+                />
+                <p className="text-xs text-gray-500">
+                  Une ligne par participant : <span className="font-mono">Nom &lt;email&gt; — société/qualité</span>.
+                </p>
+              </div>
             </div>
             <div className="space-y-1">
               <label className="block text-sm font-medium text-gray-700" htmlFor="test-transcript">
