@@ -241,3 +241,18 @@ model GenerationAuditLog {
 
   @@index([userId, createdAt])
 }
+
+// Historique des modifications de PV — traçabilité juridique
+// Pas de FK explicite : on conserve les logs même si le PV est supprimé
+model MinutesEditLog {
+  id              String        @id @default(cuid())
+  minutesId       String
+  userId          String
+  action          String        // 'content_edit' | 'status_change'
+  previousStatus  MinutesStatus
+  contentSnapshot Json          @db.JsonB
+  editedAt        DateTime      @default(now())
+
+  @@index([minutesId])
+  @@index([userId, editedAt])
+}

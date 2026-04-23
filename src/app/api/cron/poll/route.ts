@@ -3,10 +3,24 @@ import { prisma } from '@/lib/prisma'
 import { getMeetingsEndedInLastHours, getTranscription } from '@/lib/microsoft-graph'
 import { generateMinutesContent } from '@/lib/azure-openai'
 
+// Cooldown in-memory : protège contre les replay attacks (token intercepté)
+// Vercel Cron tourne toutes les 2h — cooldown 90 min laisse une marge confortable
+const COOLDOWN_MS = 90 * 60_000 // 90 minutes
+let lastSuccessfulRun: number | null = null
+
 export async function GET(req: NextRequest) {
   const authHeader = req.headers.get('authorization')
   if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
     return NextResponse.json({ error: 'Non autorisé' }, { status: 401 })
+  }
+
+  // Vérification du cooldown
+  if (lastSuccessfulRun !== null) {
+    const elapsed = Date.now() - lastSuccessfulRun
+    if (elapsed < COOLDOWN_MS) {
+      const nextAllowedAt = new Date(lastSuccessfulRun + COOLDOWN_MS).toISOString()
+      return NextResponse.json({ skipped: true, reason: 'cooldown', nextAllowedAt }, { status: 200 })
+    }
   }
 
   const usersWithToken = await prisma.user.findMany({
@@ -96,5 +110,7 @@ export async function GET(req: NextRequest) {
     }
   }
 
+  // Marquer la fin d'une exécution réussie (démarre le cooldown)
+  lastSuccessfulRun = Date.now()
   return NextResponse.json({ processed, users: usersWithToken.length })
 }

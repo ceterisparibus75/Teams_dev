@@ -378,6 +378,34 @@ export function parseMinutesContent(raw: string): MinutesContent {
   }
 }
 
+// ─── Retry avec backoff exponentiel ──────────────────────────────────────────
+
+async function withRetry<T>(
+  fn: () => Promise<T>,
+  isRetryable: (error: unknown) => boolean,
+  delays = [2000, 5000]
+): Promise<T> {
+  let lastError: unknown
+  for (let attempt = 0; attempt <= delays.length; attempt++) {
+    try {
+      return await fn()
+    } catch (error) {
+      lastError = error
+      if (attempt < delays.length && isRetryable(error)) {
+        await new Promise(resolve => setTimeout(resolve, delays[attempt]))
+        continue
+      }
+      throw error
+    }
+  }
+  throw lastError
+}
+
+function isTransientApiError(error: unknown): boolean {
+  const msg = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase()
+  return msg.includes('overloaded') || msg.includes('529') || msg.includes('rate_limit') || msg.includes('timeout') || msg.includes('network')
+}
+
 // ─── Génération principale via tool_use ───────────────────────────────────────
 
 export type GenerationStyle = 'detailed'
@@ -454,24 +482,31 @@ export async function generateMinutesContent(
     return input
   }
 
+  const callClaudeWithRetry = () => withRetry(callClaude, isTransientApiError)
+
   try {
-    let response = await callClaude()
+    const MAX_TOOL_INPUT_ATTEMPTS = 3
+    const TOOL_INPUT_DELAYS = [2000, 5000]
+
+    let response = await callClaudeWithRetry()
     tokensInput = response.usage.input_tokens
     tokensOutput = response.usage.output_tokens
 
     let toolInput = extractToolInput(response, 1)
 
-    if (!toolInput) {
-      console.warn('[Claude] Input vide (tentative 1), nouvelle tentative...')
-      response = await callClaude()
+    for (let attempt = 2; !toolInput && attempt <= MAX_TOOL_INPUT_ATTEMPTS; attempt++) {
+      const delay = TOOL_INPUT_DELAYS[attempt - 2]
+      console.warn(`[Claude] Input vide (tentative ${attempt - 1}), attente ${delay} ms avant retry...`)
+      await new Promise(resolve => setTimeout(resolve, delay))
+      response = await callClaudeWithRetry()
       tokensInput += response.usage.input_tokens
       tokensOutput += response.usage.output_tokens
-      toolInput = extractToolInput(response, 2)
+      toolInput = extractToolInput(response, attempt)
     }
 
     if (!toolInput) {
       throw new Error(
-        `Claude a retourné une réponse vide après 2 tentatives. Diagnostic : ${lastDiag}`
+        `Claude a retourné une réponse vide après ${MAX_TOOL_INPUT_ATTEMPTS} tentatives. Diagnostic : ${lastDiag}`
       )
     }
 

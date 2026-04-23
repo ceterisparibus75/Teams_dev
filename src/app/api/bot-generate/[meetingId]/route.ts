@@ -2,6 +2,28 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { generateMinutesContent } from '@/lib/azure-openai'
 
+// Rate limiting in-memory : un appel par meetingId toutes les 60 secondes
+const rateLimitMap = new Map<string, number>()
+const RATE_LIMIT_MS = 60_000   // 60 secondes entre deux appels pour le même meetingId
+const CLEANUP_TTL_MS = 300_000 // entrées supprimées après 5 minutes d'inactivité
+
+function checkRateLimit(meetingId: string): boolean {
+  const now = Date.now()
+
+  // Nettoyage des entrées expirées (> 5 min) pour éviter les fuites mémoire
+  for (const [id, ts] of rateLimitMap.entries()) {
+    if (now - ts > CLEANUP_TTL_MS) rateLimitMap.delete(id)
+  }
+
+  const lastCall = rateLimitMap.get(meetingId)
+  if (lastCall !== undefined && now - lastCall < RATE_LIMIT_MS) {
+    return false // trop tôt
+  }
+
+  rateLimitMap.set(meetingId, now)
+  return true
+}
+
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ meetingId: string }> }
@@ -13,6 +35,11 @@ export async function POST(
   }
 
   const { meetingId } = await params
+
+  // Rate limiting : un appel par meetingId toutes les 60 secondes
+  if (!checkRateLimit(meetingId)) {
+    return NextResponse.json({ error: 'Trop de requêtes' }, { status: 429 })
+  }
   const { transcript } = (await req.json()) as { transcript: string | null }
 
   const meeting = await prisma.meeting.findUnique({

@@ -74,12 +74,23 @@ export async function PATCH(
           ],
         },
       },
-      select: { id: true },
+      select: { id: true, content: true, status: true },
     })
 
     if (!accessibleMinutes) {
       return NextResponse.json({ error: 'Introuvable' }, { status: 404 })
     }
+
+    // Audit log : snapshot du contenu avant chaque modification
+    await prisma.minutesEditLog.create({
+      data: {
+        minutesId: accessibleMinutes.id,
+        userId: session.user.id,
+        action: content !== undefined ? 'content_edit' : 'status_change',
+        previousStatus: accessibleMinutes.status,
+        contentSnapshot: accessibleMinutes.content as import('@prisma/client').Prisma.InputJsonValue,
+      },
+    })
 
     const updated = await prisma.meetingMinutes.update({
       where: { id: accessibleMinutes.id },
