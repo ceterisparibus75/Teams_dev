@@ -327,17 +327,19 @@ function participantsTableGrouped(pvParticipants: PvContent['participants'], cfg
       children: [
         headerCell('Nom et prénom', cfg),
         headerCell('Société / Qualité', cfg),
+        headerCell('Email', cfg),
         headerCell('Présence', cfg),
       ],
     })
     const dataRows = members.map((p) => new TableRow({ children: [
       dataCell(p.civilite_nom, cfg),
       dataCell(p.societe_qualite, cfg),
+      dataCell(p.email ?? '', cfg),
       dataCell(p.presence, cfg),
     ]}))
     result.push(new Table({
       width: { size: 100, type: WidthType.PERCENTAGE },
-      columnWidths: [3500, 4500, 2000],
+      columnWidths: [2800, 3200, 2500, 1500],
       borders,
       rows: [headerRow, ...dataRows],
     }))

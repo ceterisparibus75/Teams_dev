@@ -68,11 +68,14 @@ Présence — règles strictes :
 - 'Téléphonique' : participant actif par téléphone
 - 'Absent' : invité à la réunion mais absent ou excusé (n'a pas participé aux échanges)
 Un participant présent mais qui ne prend pas la parole conserve son mode de présence (Visioconférence/Présentiel/Téléphonique) — seule l'absence totale justifie la valeur 'Absent'.
-⚠⚠ RÈGLE ABSOLUE ET NON NÉGOCIABLE : Toute personne dont la société contient "BL & Associés" ou "SELAS BL" est OBLIGATOIREMENT membre du cabinet mandataire. Elle ne peut JAMAIS recevoir la catégorie 'conseil_debiteur' ou 'conseil_partenaire'. Catégorie obligatoire selon la procédure :
+⚠⚠ IDENTIFICATION DES MEMBRES BL & ASSOCIÉS — RÈGLE STRICTE :
+Un participant appartient à SELAS BL & Associés UNIQUEMENT si son adresse email (liste Teams) contient "bl-associes" ou "bla.fr", OU si la transcription mentionne explicitement son appartenance au cabinet. Ne jamais déduire l'appartenance au cabinet par le seul contexte ou la proximité avec d'autres membres du cabinet.
+Si un participant est de BL & Associés, sa catégorie est OBLIGATOIREMENT :
 - Mandat ad hoc → 'mandataire_ad_hoc'
 - Conciliation → 'conciliateur'
 - Redressement judiciaire ou Sauvegarde → 'administrateur_judiciaire'
-Erreur critique si un membre de BL & Associés est catégorisé autrement.
+Tout autre participant (même avocat, même présent dans toutes les réunions) doit être catégorisé selon son rôle réel : conseil du débiteur, expert-comptable, partenaire bancaire, etc.
+email : recopie EXACTEMENT l'adresse email depuis la liste Teams fournie pour chaque participant identifié.
 actions : verbe à l'infinitif + objet précis, responsable avec entité entre parenthèses, échéance en français complet.
 prochaine_reunion : ne renseigne que si explicitement mentionnée.
 points_vigilance et precisions_a_apporter : réservés aux éléments ambigus ou sensibles.`
@@ -270,7 +273,7 @@ const MAX_TAIL_CHARS = 10_000
 export function buildPrompt(
   subject: string,
   transcription: string | null,
-  participants?: Array<{ name: string }>,
+  participants?: Array<{ name: string; email?: string; company?: string | null }>,
   date?: Date
 ): string {
   const dateStr = date
@@ -278,7 +281,12 @@ export function buildPrompt(
     : null
   const dateBlock = dateStr ? `\nDate de la réunion : ${dateStr}` : ''
   const participantsBlock = participants?.length
-    ? `\nParticipants identifiés : ${participants.map((p) => p.name).join(', ')}`
+    ? `\nParticipants (liste Teams — utilise l'email pour catégoriser et le recopier dans le champ email) :\n${participants.map((p) => {
+        const parts = [p.name]
+        if (p.email) parts.push(`<${p.email}>`)
+        if (p.company) parts.push(`— ${p.company}`)
+        return `- ${parts.join(' ')}`
+      }).join('\n')}`
     : ''
 
   let safeTranscription = transcription
@@ -345,7 +353,7 @@ export type GenerationStyle = 'detailed'
 export async function generateMinutesContent(
   subject: string,
   transcription: string | null,
-  participants?: Array<{ name: string }>,
+  participants?: Array<{ name: string; email?: string; company?: string | null }>,
   options?: { userId?: string; minutesId?: string; promptText?: string; modelName?: string; meetingDate?: Date }
 ): Promise<MinutesContent> {
   const client = getClient()
