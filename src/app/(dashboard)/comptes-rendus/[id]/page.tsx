@@ -54,6 +54,7 @@ export default function MinutesDetailPage() {
   const router = useRouter()
   const [data, setData] = useState<MinutesData | null>(null)
   const [content, setContent] = useState<MinutesContent | null>(null)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [sendOpen, setSendOpen] = useState(false)
   const [saving, setSaving] = useState(false)
   const [validating, setValidating] = useState(false)
@@ -70,11 +71,14 @@ export default function MinutesDetailPage() {
 
   useEffect(() => {
     fetch(`/api/minutes/${id}`)
-      .then((r) => r.json())
-      .then((d: MinutesData) => {
-        setData(d)
-        setContent(d.content)
+      .then(async (r) => {
+        const d = await r.json()
+        if (!r.ok) { setLoadError(d.error ?? 'Compte rendu introuvable'); return }
+        if (!d.content) { setLoadError('Le contenu de ce compte rendu est vide ou corrompu.'); return }
+        setData(d as MinutesData)
+        setContent(d.content as MinutesContent)
       })
+      .catch(() => setLoadError('Impossible de charger le compte rendu.'))
   }, [id])
 
   const save = useCallback(
@@ -173,6 +177,16 @@ export default function MinutesDetailPage() {
     if (!res.ok) { toast.error("Erreur lors de l'envoi"); return }
     toast.success('Compte rendu envoyé aux participants')
     setData((prev) => prev ? { ...prev, status: 'SENT' } : prev)
+  }
+
+  if (loadError) {
+    return (
+      <div className="bg-red-50 border border-red-200 rounded-xl p-6 space-y-3">
+        <p className="text-sm font-semibold text-red-700">Impossible d'afficher ce compte rendu</p>
+        <p className="text-sm text-red-600">{loadError}</p>
+        <button onClick={() => router.back()} className="text-sm text-red-600 underline">← Retour</button>
+      </div>
+    )
   }
 
   if (!data || !content) {
@@ -292,6 +306,13 @@ export default function MinutesDetailPage() {
               Régénérer avec ces paramètres
             </button>
           </div>
+        </div>
+      )}
+
+      {content.notes?.includes('sans transcription') && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-800">
+          <strong>Aucune transcription Teams disponible</strong> — ce brouillon a été créé avec un contenu vide à compléter manuellement.
+          Pour générer un vrai procès-verbal, démarrez la transcription dans la réunion Teams puis cliquez sur <strong>Régénérer le procès-verbal</strong>.
         </div>
       )}
 
