@@ -432,9 +432,27 @@ export async function generateMinutesContent(
       )
     }
 
+    // Si Claude a imbriqué le contenu sous une clé intermédiaire (ex: { "generer_pv": {...} }),
+    // on détecte et déballe automatiquement.
+    const topKeys = Object.keys(toolInput)
+    if (topKeys.length === 1) {
+      const nested = toolInput[topKeys[0]]
+      if (nested && typeof nested === 'object' && !Array.isArray(nested)) {
+        const nestedObj = nested as Record<string, unknown>
+        if ('metadata' in nestedObj || 'resume' in nestedObj || 'sections' in nestedObj) {
+          console.log('[Claude] Structure imbriquée détectée sous "%s" — déballage', topKeys[0])
+          toolInput = nestedObj
+        }
+      }
+    }
+
+    const topLevelKeys = Object.keys(toolInput).join(', ')
+    console.log('[Claude] Clés top-level avant validation Zod : %s', topLevelKeys)
+
     const validation = PvContentSchema.safeParse(toolInput)
     if (!validation.success) {
-      console.warn('[Claude] Zod validation partielle:', validation.error.flatten())
+      console.warn('[Claude] Zod validation partielle — clés présentes: %s', topLevelKeys)
+      console.warn('[Claude] Erreurs Zod:', validation.error.flatten())
       const partial = toolInput as Partial<PvContent>
       if (partial.resume && partial.sections?.length) {
         const lenientInput = {
@@ -458,12 +476,14 @@ export async function generateMinutesContent(
         if (lenientValidation.success) {
           return pvContentToMinutesContent(lenientValidation.data)
         }
-        console.error('[Claude] Lenient parse also failed:', lenientValidation.error.flatten())
-        throw new Error(`Réponse Claude invalide : ${lenientValidation.error.issues.map(i => i.message).join(', ')}`)
+        throw new Error(
+          `Réponse Claude invalide (Zod) : ${lenientValidation.error.issues.map(i => i.message).join(', ')} | clés reçues: ${topLevelKeys}`
+        )
       }
       throw new Error(
-        `Réponse Claude incomplète — résumé ou sections manquants. ` +
-        `Détails : ${validation.error.issues.map(i => `${i.path.join('.')}: ${i.message}`).slice(0, 3).join('; ')}`
+        `Réponse Claude incomplète. ` +
+        `Clés reçues: [${topLevelKeys}]. ` +
+        `Champs manquants: ${validation.error.issues.map(i => `${i.path.join('.')}: ${i.message}`).slice(0, 5).join('; ')}`
       )
     }
 
