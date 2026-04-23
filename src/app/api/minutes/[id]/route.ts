@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
+import { getMinutesQualityAlerts } from '@/lib/minutes-quality'
+import type { MinutesContent } from '@/types'
 
 export async function GET(
   _req: NextRequest,
@@ -50,7 +52,8 @@ export async function GET(
   const generationError = timedOut
     ? 'La génération a pris trop de temps. Cliquez sur "Régénérer le procès-verbal" pour réessayer.'
     : (typeof raw?._generationError === 'string' ? raw._generationError : null)
-  return NextResponse.json({ ...minutes, generating: actualGenerating, generationError })
+  const qualityAlerts = getMinutesQualityAlerts(minutes.content as MinutesContent)
+  return NextResponse.json({ ...minutes, generating: actualGenerating, generationError, qualityAlerts })
 }
 
 export async function PATCH(
@@ -103,7 +106,8 @@ export async function PATCH(
         }),
       },
     })
-    return NextResponse.json(updated)
+    const qualityAlerts = getMinutesQualityAlerts(updated.content as MinutesContent)
+    return NextResponse.json({ ...updated, qualityAlerts })
   } catch (error) {
     console.error('[minutes/PATCH]', error)
     return NextResponse.json({ error: 'Erreur serveur' }, { status: 500 })

@@ -10,7 +10,7 @@ interface Recipient {
 interface Props {
   open: boolean
   onClose: () => void
-  onConfirm: (recipients: Recipient[]) => Promise<void>
+  onConfirm: (recipients: Recipient[]) => Promise<boolean>
   participants: Recipient[]
   subject: string
 }
@@ -33,9 +33,9 @@ export function SendModal({ open, onClose, onConfirm, participants, subject }: P
   async function handleSend() {
     setSending(true)
     const recipients = participants.filter((p) => selected.has(p.email))
-    await onConfirm(recipients)
+    const success = await onConfirm(recipients)
     setSending(false)
-    onClose()
+    if (success) onClose()
   }
 
   return (

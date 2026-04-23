@@ -4,6 +4,7 @@ import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { generateDocx, buildDocxFilename } from '@/lib/docx-generator'
 import { sendMinutesEmail } from '@/lib/email-sender'
+import { getMinutesQualityAlerts } from '@/lib/minutes-quality'
 import type { MinutesContent, TemplateSection } from '@/types'
 
 const DEFAULT_SECTIONS: TemplateSection[] = [
@@ -39,11 +40,24 @@ export async function POST(
   })
   if (!minutes) return NextResponse.json({ error: 'Introuvable' }, { status: 404 })
 
+  const content = minutes.content as MinutesContent
+  const qualityAlerts = getMinutesQualityAlerts(content)
+  if (qualityAlerts.length > 0) {
+    return NextResponse.json(
+      {
+        error: "Le compte rendu contient des termes à corriger avant envoi.",
+        code: 'quality_guard_failed',
+        qualityAlerts,
+      },
+      { status: 422 }
+    )
+  }
+
   const docxBuffer = await generateDocx({
     subject: minutes.meeting.subject,
     date: minutes.meeting.startDateTime,
     participants: minutes.meeting.participants,
-    content: minutes.content as MinutesContent,
+    content,
     sections: DEFAULT_SECTIONS,
     template: minutes.template,
   })
@@ -54,7 +68,7 @@ export async function POST(
     userId: session.user.id,
     subject: minutes.meeting.subject,
     recipients,
-    content: minutes.content as MinutesContent,
+    content,
     docxBuffer,
     docxFilename: filename,
   })

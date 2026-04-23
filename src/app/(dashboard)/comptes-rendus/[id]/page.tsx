@@ -7,6 +7,8 @@ import { Button, Badge } from '@/components/ui'
 import { SectionEditor } from '@/components/minutes/SectionEditor'
 import { SendModal } from '@/components/minutes/SendModal'
 import { formatDateTime } from '@/lib/utils'
+import { getMinutesQualityAlerts, type MinutesQualityAlert } from '@/lib/minutes-quality'
+import type { PvContent } from '@/schemas/pv-content.schema'
 import type { MinutesContent, TemplateSection } from '@/types'
 
 interface PromptOption {
@@ -33,6 +35,7 @@ interface MinutesData {
   meetingId: string
   status: string
   content: MinutesContent
+  qualityAlerts?: MinutesQualityAlert[]
   template?: { sections: TemplateSection[] } | null
   meeting: {
     id: string
@@ -47,6 +50,14 @@ interface ApiErrorPayload {
   error?: string
   code?: string
   detail?: string | null
+  qualityAlerts?: MinutesQualityAlert[]
+}
+
+function splitEditableLines(value: string): string[] {
+  return value
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
 }
 
 export default function MinutesDetailPage() {
@@ -61,6 +72,7 @@ export default function MinutesDetailPage() {
   const [regenerating, setRegenerating] = useState(false)
   const [generating, setGenerating] = useState(false)
   const [generationError, setGenerationError] = useState<string | null>(null)
+  const [qualityAlerts, setQualityAlerts] = useState<MinutesQualityAlert[]>([])
   const [elapsed, setElapsed] = useState(0)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -72,6 +84,11 @@ export default function MinutesDetailPage() {
   const [customPromptText, setCustomPromptText] = useState<string>('')
   const [customModel, setCustomModel] = useState<string>('claude-opus-4-7')
 
+  const updateContent = useCallback((nextContent: MinutesContent) => {
+    setContent(nextContent)
+    setQualityAlerts(getMinutesQualityAlerts(nextContent))
+  }, [])
+
   useEffect(() => {
     fetch(`/api/minutes/${id}`)
       .then(async (r) => {
@@ -82,6 +99,7 @@ export default function MinutesDetailPage() {
         setContent(d.content as MinutesContent)
         setGenerating(d.generating === true)
         setGenerationError(typeof d.generationError === 'string' ? d.generationError : null)
+        setQualityAlerts(Array.isArray(d.qualityAlerts) ? d.qualityAlerts : [])
       })
       .catch(() => setLoadError('Impossible de charger le compte rendu.'))
   }, [id])
@@ -101,6 +119,7 @@ export default function MinutesDetailPage() {
             setContent(d.content as MinutesContent)
             const errMsg = typeof d.generationError === 'string' ? d.generationError : null
             setGenerationError(errMsg)
+            setQualityAlerts(Array.isArray(d.qualityAlerts) ? d.qualityAlerts : [])
             if (errMsg) {
               toast.error('Échec de la génération Claude')
             } else {
@@ -121,6 +140,10 @@ export default function MinutesDetailPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ content: newContent }),
       })
+        .then((r) => r.json())
+        .then((payload) => {
+          setQualityAlerts(Array.isArray(payload.qualityAlerts) ? payload.qualityAlerts : [])
+        })
       setSaving(false)
     },
     [id]
@@ -193,22 +216,66 @@ export default function MinutesDetailPage() {
       const fresh = await fetch(`/api/minutes/${id}`).then(r => r.json())
       setData(fresh)
       setContent(fresh.content)
+      setQualityAlerts(Array.isArray(fresh.qualityAlerts) ? fresh.qualityAlerts : [])
     } finally {
       setRegenerating(false)
     }
   }
 
   async function handleSend(recipients: Array<{ name: string; email: string }>) {
-    if (!content) return
+    if (!content) return false
     await save(content)
     const res = await fetch(`/api/send/${id}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ recipients }),
     })
-    if (!res.ok) { toast.error("Erreur lors de l'envoi"); return }
+    if (!res.ok) {
+      const err = (await res.json().catch(() => ({}))) as ApiErrorPayload
+      if (Array.isArray(err.qualityAlerts) && err.qualityAlerts.length > 0) {
+        setQualityAlerts(err.qualityAlerts)
+        toast.error(err.error ?? "Le compte rendu doit être corrigé avant envoi", {
+          description: err.qualityAlerts[0]?.message,
+        })
+      } else {
+        toast.error(err.error ?? "Erreur lors de l'envoi")
+      }
+      return false
+    }
     toast.success('Compte rendu envoyé aux participants')
     setData((prev) => prev ? { ...prev, status: 'SENT' } : prev)
+    return true
+  }
+
+  async function handleExport() {
+    if (!content) return
+    await save(content)
+    const res = await fetch(`/api/export/${id}`)
+    if (!res.ok) {
+      const err = (await res.json().catch(() => ({}))) as ApiErrorPayload
+      if (Array.isArray(err.qualityAlerts) && err.qualityAlerts.length > 0) {
+        setQualityAlerts(err.qualityAlerts)
+        toast.error(err.error ?? "Le compte rendu doit être corrigé avant export", {
+          description: err.qualityAlerts[0]?.message,
+        })
+      } else {
+        toast.error(err.error ?? "Erreur lors de l'export")
+      }
+      return
+    }
+
+    const blob = await res.blob()
+    const url = window.URL.createObjectURL(blob)
+    const disposition = res.headers.get('Content-Disposition') ?? ''
+    const filenameMatch = disposition.match(/filename="([^"]+)"/)
+    const filename = filenameMatch?.[1] ?? 'compte-rendu.docx'
+    const link = document.createElement('a')
+    link.href = url
+    link.download = filename
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    window.URL.revokeObjectURL(url)
   }
 
   if (loadError) {
@@ -235,8 +302,21 @@ export default function MinutesDetailPage() {
   const sections: TemplateSection[] = data.template?.sections ?? DEFAULT_SECTIONS
   const status = statusConfig[data.status] ?? statusConfig['DRAFT']
   const hasPVSections = (content.sections?.length ?? 0) > 0
+  const pvContent = content._pv as PvContent | undefined
   const ACTION_SECTION: TemplateSection = { id: 'actions', label: 'Actions à suivre', type: 'table', aiGenerated: true }
   const NOTES_SECTION: TemplateSection = { id: 'notes', label: 'Notes complémentaires', type: 'text', aiGenerated: false }
+
+  function updatePointsVigilance(value: string) {
+    if (!content || !pvContent) return
+    const nextContent: MinutesContent = {
+      ...content,
+      _pv: {
+        ...pvContent,
+        points_vigilance: splitEditableLines(value),
+      },
+    }
+    updateContent(nextContent)
+  }
 
   return (
     <div className="max-w-3xl space-y-6">
@@ -357,6 +437,25 @@ export default function MinutesDetailPage() {
         </div>
       )}
 
+      {!generating && qualityAlerts.length > 0 && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-900 space-y-2">
+          <p><strong>Des termes à corriger ont été détectés.</strong> L’export DOCX et l’envoi mail sont bloqués tant que ces formulations restent dans le compte rendu.</p>
+          <ul className="list-disc list-inside space-y-1 text-amber-800">
+            {qualityAlerts.slice(0, 4).map((alert, index) => (
+              <li key={`${alert.field}-${index}`}>
+                <span className="font-medium">{alert.field}</span> — {alert.message}
+                <span className="block text-xs text-amber-700 mt-0.5">{alert.excerpt}</span>
+              </li>
+            ))}
+          </ul>
+          {qualityAlerts.length > 4 && (
+            <p className="text-xs text-amber-700">
+              {qualityAlerts.length - 4} autre{qualityAlerts.length - 4 > 1 ? 's' : ''} occurrence{qualityAlerts.length - 4 > 1 ? 's' : ''} à corriger.
+            </p>
+          )}
+        </div>
+      )}
+
       {!generating && !generationError && content.notes?.includes('sans transcription') && (
         <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-800">
           <strong>Aucune transcription Teams disponible</strong> — ce brouillon a été créé avec un contenu vide à compléter manuellement.
@@ -376,7 +475,7 @@ export default function MinutesDetailPage() {
               <textarea
                 value={content.summary}
                 onChange={(e) => {
-                  setContent({ ...content, summary: e.target.value })
+                  updateContent({ ...content, summary: e.target.value })
                   e.target.style.height = 'auto'
                   e.target.style.height = `${e.target.scrollHeight}px`
                 }}
@@ -397,7 +496,7 @@ export default function MinutesDetailPage() {
                   const newSections = content.sections!.map((s, j) =>
                     j === i ? { ...s, contenu: e.target.value } : s
                   )
-                  setContent({ ...content, sections: newSections })
+                  updateContent({ ...content, sections: newSections })
                   e.target.style.height = 'auto'
                   e.target.style.height = `${e.target.scrollHeight}px`
                 }}
@@ -409,12 +508,29 @@ export default function MinutesDetailPage() {
           ))}
           <div className="bg-white border border-gray-200 rounded-xl p-6 space-y-3">
             <h2 className="text-lg font-semibold text-gray-900">Actions à suivre</h2>
-            <SectionEditor section={ACTION_SECTION} content={content} onChange={setContent} />
+            <SectionEditor section={ACTION_SECTION} content={content} onChange={updateContent} />
           </div>
           <div className="bg-white border border-gray-200 rounded-xl p-6 space-y-3">
             <h2 className="text-lg font-semibold text-gray-900">Notes complémentaires</h2>
-            <SectionEditor section={NOTES_SECTION} content={content} onChange={setContent} />
+            <SectionEditor section={NOTES_SECTION} content={content} onChange={updateContent} />
           </div>
+          {pvContent && (
+            <div className="bg-white border border-gray-200 rounded-xl p-6 space-y-3">
+              <h2 className="text-lg font-semibold text-gray-900">Points de vigilance</h2>
+              <textarea
+                value={pvContent.points_vigilance?.join('\n') ?? ''}
+                onChange={(e) => {
+                  updatePointsVigilance(e.target.value)
+                  e.target.style.height = 'auto'
+                  e.target.style.height = `${e.target.scrollHeight}px`
+                }}
+                rows={6}
+                style={{ minHeight: '9rem' }}
+                placeholder="Un point de vigilance par ligne…"
+                className="w-full border border-amber-200 rounded-lg p-4 text-sm text-gray-700 leading-relaxed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 resize-y overflow-auto"
+              />
+            </div>
+          )}
         </>
       ) : (
         sections.map((section) => (
@@ -423,17 +539,15 @@ export default function MinutesDetailPage() {
             className="bg-white border border-gray-200 rounded-xl p-6 space-y-3"
           >
             <h2 className="text-lg font-semibold text-gray-900">{section.label}</h2>
-            <SectionEditor section={section} content={content} onChange={setContent} />
+            <SectionEditor section={section} content={content} onChange={updateContent} />
           </div>
         ))
       )}
 
       <div className="flex gap-3 pt-2 flex-wrap">
-        <a href={`/api/export/${id}`} target="_blank" rel="noreferrer">
-          <Button variant="outline" className="flex items-center gap-2">
-            <Download size={16} /> Télécharger DOCX
-          </Button>
-        </a>
+        <Button variant="outline" className="flex items-center gap-2" onClick={handleExport}>
+          <Download size={16} /> Télécharger DOCX
+        </Button>
         {data.status === 'DRAFT' && (
           <Button
             onClick={handleValidate}

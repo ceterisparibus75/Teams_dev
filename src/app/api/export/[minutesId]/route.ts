@@ -3,6 +3,7 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { generateDocx, buildDocxFilename } from '@/lib/docx-generator'
+import { getMinutesQualityAlerts } from '@/lib/minutes-quality'
 import type { MinutesContent, TemplateSection } from '@/types'
 
 const DEFAULT_SECTIONS: TemplateSection[] = [
@@ -34,11 +35,24 @@ export async function GET(
   })
   if (!minutes) return NextResponse.json({ error: 'Introuvable' }, { status: 404 })
 
+  const content = minutes.content as MinutesContent
+  const qualityAlerts = getMinutesQualityAlerts(content)
+  if (qualityAlerts.length > 0) {
+    return NextResponse.json(
+      {
+        error: 'Le compte rendu contient des termes à corriger avant export.',
+        code: 'quality_guard_failed',
+        qualityAlerts,
+      },
+      { status: 422 }
+    )
+  }
+
   const docxBuffer = await generateDocx({
     subject: minutes.meeting.subject,
     date: minutes.meeting.startDateTime,
     participants: minutes.meeting.participants,
-    content: minutes.content as MinutesContent,
+    content,
     sections: DEFAULT_SECTIONS,
     template: minutes.template,
   })
