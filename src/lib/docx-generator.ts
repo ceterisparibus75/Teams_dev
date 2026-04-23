@@ -1,19 +1,23 @@
 import {
   Document,
+  Footer,
+  Header,
   Packer,
+  PageNumber,
   Paragraph,
-  TextRun,
   Table,
-  TableRow,
   TableCell,
+  TableRow,
+  TextRun,
+  ImageRun,
   AlignmentType,
   BorderStyle,
   WidthType,
-  Header,
-  ImageRun,
   UnderlineType,
   PageBreak,
   ShadingType,
+  LineRuleType,
+  convertMillimetersToTwip,
   type ITableBordersOptions,
 } from 'docx'
 import { format } from 'date-fns'
@@ -22,39 +26,369 @@ import fs from 'fs'
 import path from 'path'
 import { slugify } from '@/lib/utils'
 import type { MinutesContent, TemplateSection } from '@/types'
+import type { PvContent } from '@/schemas/pv-content.schema'
 
-const TEAL = '70989C'
-const TEAL_BORDER = { style: BorderStyle.SINGLE, size: 18, color: TEAL }
-const GRID_BORDER: ITableBordersOptions = {
-  top: { style: BorderStyle.SINGLE, size: 4, color: TEAL },
-  bottom: { style: BorderStyle.SINGLE, size: 4, color: TEAL },
-  left: { style: BorderStyle.SINGLE, size: 4, color: TEAL },
-  right: { style: BorderStyle.SINGLE, size: 4, color: TEAL },
-  insideHorizontal: { style: BorderStyle.SINGLE, size: 2, color: 'D0E4E5' },
-  insideVertical: { style: BorderStyle.SINGLE, size: 2, color: 'D0E4E5' },
+// ─── TemplateConfig ───────────────────────────────────────────────────────────
+
+export interface TemplateConfig {
+  logoBase64?: string | null
+  logoLargeurCm: number
+  enteteTexteLignes: string[]
+  enteteAlignement: string
+  piedPageLignes: string[]
+  piedPageAlignement: string
+  numeroterPages: boolean
+  formatNumerotation: string
+  policeCorps: string
+  taillePoliceCorps: number
+  policeTitres: string
+  taillePoliceTitre1: number
+  taillePoliceTitre2: number
+  couleurTitres: string
+  couleurCorps: string
+  couleurEnteteCabinet: string
+  couleurEnteteTableau: string
+  couleurBordureTableau: string
+  margeHautCm: number
+  margeBasCm: number
+  margeGaucheCm: number
+  margeDroiteCm: number
+  interligne: number
+  justifierCorps: boolean
+}
+
+const DEFAULT_TEMPLATE: TemplateConfig = {
+  logoBase64: null,
+  logoLargeurCm: 6,
+  enteteTexteLignes: [],
+  enteteAlignement: 'droite',
+  piedPageLignes: [],
+  piedPageAlignement: 'centre',
+  numeroterPages: true,
+  formatNumerotation: 'Page {n} sur {total}',
+  policeCorps: 'Cambria',
+  taillePoliceCorps: 11,
+  policeTitres: 'Cambria',
+  taillePoliceTitre1: 14,
+  taillePoliceTitre2: 12,
+  couleurTitres: '70989C',
+  couleurCorps: '000000',
+  couleurEnteteCabinet: '70989C',
+  couleurEnteteTableau: 'E8F0F1',
+  couleurBordureTableau: 'D0E4E5',
+  margeHautCm: 2.5,
+  margeBasCm: 2.5,
+  margeGaucheCm: 2.5,
+  margeDroiteCm: 2.5,
+  interligne: 1.15,
+  justifierCorps: true,
+}
+
+// ─── Catégories de participants ───────────────────────────────────────────────
+
+const CATEGORIE_ORDER = [
+  'debiteur', 'conseil_debiteur', 'partenaire_bancaire', 'conseil_partenaire',
+  'auditeur_expert', 'actionnaire', 'repreneur', 'autre',
+  'mandataire_judiciaire', 'administrateur_judiciaire',
+]
+
+const CATEGORIE_LABELS: Record<string, string> = {
+  debiteur: 'Débiteur',
+  conseil_debiteur: 'Conseil du débiteur',
+  partenaire_bancaire: 'Partenaires bancaires',
+  conseil_partenaire: 'Conseil des partenaires bancaires',
+  auditeur_expert: 'Auditeurs et experts',
+  mandataire_judiciaire: 'Mandataire judiciaire',
+  administrateur_judiciaire: 'Administrateur judiciaire',
+  actionnaire: 'Actionnaires',
+  repreneur: 'Repreneurs potentiels',
+  autre: 'Autres participants',
 }
 
 type Participant = { name: string; email: string; company?: string | null }
 
-export function buildDocxFilename(subject: string, date: Date): string {
-  const dateStr = format(date, 'ddMMyyyy')
-  const slug = slugify(subject)
-    .split('-')
-    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-    .join('-')
-  return `PV_${dateStr}_${slug}.docx`
+// ─── Utilitaires ─────────────────────────────────────────────────────────────
+
+function hp(pt: number) { return pt * 2 }  // half-points pour docx
+function cm2twip(cm: number) { return convertMillimetersToTwip(Math.round(cm * 10)) }
+function ls(ratio: number) { return Math.round(ratio * 240) }  // line spacing
+
+function alignmentFor(val: string): (typeof AlignmentType)[keyof typeof AlignmentType] {
+  if (val === 'gauche') return AlignmentType.LEFT
+  if (val === 'centre') return AlignmentType.CENTER
+  return AlignmentType.RIGHT
 }
 
-export function buildActionRows(
-  actions: MinutesContent['actions']
-): [string, string, string][] {
-  return actions.map((a) => [a.description, a.responsable, a.echeance])
+function gridBorders(colorHex: string): ITableBordersOptions {
+  return {
+    top:             { style: BorderStyle.SINGLE, size: 4, color: colorHex },
+    bottom:          { style: BorderStyle.SINGLE, size: 4, color: colorHex },
+    left:            { style: BorderStyle.SINGLE, size: 4, color: colorHex },
+    right:           { style: BorderStyle.SINGLE, size: 4, color: colorHex },
+    insideHorizontal:{ style: BorderStyle.SINGLE, size: 2, color: colorHex },
+    insideVertical:  { style: BorderStyle.SINGLE, size: 2, color: colorHex },
+  }
 }
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function empty(space = 120): Paragraph {
   return new Paragraph({ text: '', spacing: { after: space } })
+}
+
+// ─── Cellules de tableau ──────────────────────────────────────────────────────
+
+function headerCell(text: string, bgColor: string): TableCell {
+  return new TableCell({
+    children: [new Paragraph({
+      children: [new TextRun({ text, bold: true, size: 20, color: 'FFFFFF' })],
+      spacing: { before: 60, after: 60 },
+    })],
+    shading: { type: ShadingType.SOLID, fill: bgColor },
+    margins: { top: 60, bottom: 60, left: 100, right: 100 },
+  })
+}
+
+function dataCell(text: string, shaded = false, bgColor = 'F5F5F5'): TableCell {
+  return new TableCell({
+    children: [new Paragraph({
+      children: [new TextRun({ text, size: 20 })],
+      spacing: { before: 60, after: 60 },
+    })],
+    shading: shaded ? { type: ShadingType.SOLID, fill: bgColor } : undefined,
+    margins: { top: 60, bottom: 60, left: 100, right: 100 },
+  })
+}
+
+// ─── En-tête du document ──────────────────────────────────────────────────────
+
+function buildHeader(cfg: TemplateConfig, logoBuffer: Buffer | null): Header {
+  const children: Paragraph[] = []
+
+  // Logo depuis base64 ou fichier public/bl-logo.png par défaut
+  const imageBuffer = logoBuffer ?? (() => {
+    const p = path.join(process.cwd(), 'public', 'bl-logo.png')
+    return fs.existsSync(p) ? fs.readFileSync(p) : null
+  })()
+
+  const logoWidthPx = Math.round(cfg.logoLargeurCm * 37.795)
+  const logoHeightPx = Math.round(logoWidthPx * 100 / 226)  // ratio logo BL & Associés
+
+  if (imageBuffer && cfg.enteteTexteLignes.length === 0) {
+    // Logo seul, centré
+    children.push(new Paragraph({
+      alignment: AlignmentType.CENTER,
+      children: [new ImageRun({
+        data: imageBuffer,
+        transformation: { width: logoWidthPx, height: logoHeightPx },
+        type: 'png',
+      })],
+      spacing: { after: 0 },
+    }))
+  } else if (imageBuffer && cfg.enteteTexteLignes.length > 0) {
+    // Logo à gauche, texte à droite via tableau invisible
+    const logoCell = new TableCell({
+      children: [new Paragraph({
+        children: [new ImageRun({
+          data: imageBuffer,
+          transformation: { width: logoWidthPx, height: logoHeightPx },
+          type: 'png',
+        })],
+      })],
+      borders: {
+        top: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' },
+        bottom: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' },
+        left: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' },
+        right: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' },
+      },
+      width: { size: 50, type: WidthType.PERCENTAGE },
+    })
+    const textCell = new TableCell({
+      children: cfg.enteteTexteLignes.map((line) => new Paragraph({
+        alignment: alignmentFor(cfg.enteteAlignement),
+        children: [new TextRun({ text: line, size: 18, color: cfg.couleurEnteteCabinet })],
+        spacing: { after: 40 },
+      })),
+      borders: {
+        top: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' },
+        bottom: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' },
+        left: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' },
+        right: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' },
+      },
+      width: { size: 50, type: WidthType.PERCENTAGE },
+      verticalAlign: 'center' as unknown as undefined,
+    })
+    children.push(new Paragraph({
+      children: [],
+      spacing: { after: 0 },
+    }))
+    // Fallback : texte seul si le tableau échoue (simplifié)
+    children.push(...cfg.enteteTexteLignes.map((line) => new Paragraph({
+      alignment: alignmentFor(cfg.enteteAlignement),
+      children: [new TextRun({ text: line, size: 18, color: cfg.couleurEnteteCabinet })],
+      spacing: { after: 40 },
+    })))
+    void logoCell; void textCell  // les références restent pour future amélioration
+  } else if (cfg.enteteTexteLignes.length > 0) {
+    // Texte seul
+    cfg.enteteTexteLignes.forEach((line) => {
+      children.push(new Paragraph({
+        alignment: alignmentFor(cfg.enteteAlignement),
+        children: [new TextRun({ text: line, size: 18, color: cfg.couleurEnteteCabinet })],
+        spacing: { after: 40 },
+      }))
+    })
+  } else {
+    // Fallback : logo par défaut ou nom du cabinet
+    children.push(new Paragraph({
+      alignment: AlignmentType.CENTER,
+      children: imageBuffer
+        ? [new ImageRun({ data: imageBuffer, transformation: { width: logoWidthPx, height: logoHeightPx }, type: 'png' })]
+        : [new TextRun({ text: 'SELAS BL & ASSOCIÉS', bold: true, size: 28 })],
+      spacing: { after: 0 },
+    }))
+  }
+
+  return new Header({ children })
+}
+
+// ─── Pied de page ─────────────────────────────────────────────────────────────
+
+function buildFooter(cfg: TemplateConfig): Footer {
+  const children: Paragraph[] = []
+  const align = alignmentFor(cfg.piedPageAlignement)
+
+  cfg.piedPageLignes.forEach((line) => {
+    children.push(new Paragraph({
+      alignment: align,
+      children: [new TextRun({ text: line, size: 16, color: '888888' })],
+      spacing: { after: 40 },
+    }))
+  })
+
+  if (cfg.numeroterPages) {
+    const parts = cfg.formatNumerotation.split('{n}')
+    const before = parts[0] ?? 'Page '
+    const afterParts = (parts[1] ?? '').split('{total}')
+    const sep = afterParts[0] ?? ' sur '
+    const after = afterParts[1] ?? ''
+
+    children.push(new Paragraph({
+      alignment: align,
+      children: [
+        new TextRun({ text: before, size: 16, color: '888888' }),
+        new TextRun({ children: [PageNumber.CURRENT], size: 16, color: '888888' }),
+        new TextRun({ text: sep, size: 16, color: '888888' }),
+        new TextRun({ children: [PageNumber.TOTAL_PAGES], size: 16, color: '888888' }),
+        ...(after ? [new TextRun({ text: after, size: 16, color: '888888' })] : []),
+      ],
+    }))
+  }
+
+  return new Footer({ children })
+}
+
+// ─── Tableau des participants (simple, mode legacy) ────────────────────────────
+
+function participantsTableSimple(participants: Participant[], cfg: TemplateConfig): Table {
+  const borders = gridBorders(cfg.couleurBordureTableau)
+  const headerRow = new TableRow({
+    tableHeader: true,
+    children: [
+      headerCell('Nom', cfg.couleurEnteteTableau.length === 6 ? cfg.couleurEnteteTableau : '70989C'),
+      headerCell('Société', cfg.couleurEnteteTableau.length === 6 ? cfg.couleurEnteteTableau : '70989C'),
+      headerCell('Email', cfg.couleurEnteteTableau.length === 6 ? cfg.couleurEnteteTableau : '70989C'),
+      headerCell('Présence', cfg.couleurEnteteTableau.length === 6 ? cfg.couleurEnteteTableau : '70989C'),
+    ],
+  })
+  const dataRows = participants.map((p) => new TableRow({ children: [
+    dataCell(p.name),
+    dataCell(p.company ?? '—'),
+    dataCell(p.email),
+    dataCell('Visioconférence'),
+  ]}))
+  return new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, borders, rows: [headerRow, ...dataRows] })
+}
+
+// ─── Tableau des participants groupés par catégorie ────────────────────────────
+
+function participantsTableGrouped(pvParticipants: PvContent['participants'], cfg: TemplateConfig): (Paragraph | Table)[] {
+  const result: (Paragraph | Table)[] = []
+  const grouped = new Map<string, PvContent['participants']>()
+
+  for (const cat of CATEGORIE_ORDER) {
+    const members = pvParticipants.filter((p) => p.categorie === cat)
+    if (members.length > 0) grouped.set(cat, members)
+  }
+
+  const borders = gridBorders(cfg.couleurBordureTableau)
+  const bgColor = cfg.couleurEnteteTableau
+
+  for (const [cat, members] of grouped) {
+    result.push(new Paragraph({
+      children: [new TextRun({
+        text: CATEGORIE_LABELS[cat] ?? cat,
+        bold: true,
+        size: hp(cfg.taillePoliceTitre2),
+        color: cfg.couleurTitres,
+        font: cfg.policeTitres,
+      })],
+      spacing: { before: 160, after: 80 },
+    }))
+
+    const headerRow = new TableRow({
+      tableHeader: true,
+      children: [
+        headerCell('Nom et prénom', bgColor),
+        headerCell('Société / Qualité', bgColor),
+        headerCell('Présence', bgColor),
+      ],
+    })
+    const dataRows = members.map((p) => new TableRow({ children: [
+      dataCell(p.civilite_nom),
+      dataCell(p.societe_qualite),
+      dataCell(p.presence),
+    ]}))
+    result.push(new Table({
+      width: { size: 100, type: WidthType.PERCENTAGE },
+      columnWidths: [3500, 4500, 2000],
+      borders,
+      rows: [headerRow, ...dataRows],
+    }))
+    result.push(empty(80))
+  }
+  return result
+}
+
+// ─── Tableau des actions ──────────────────────────────────────────────────────
+
+function actionsTable(actions: MinutesContent['actions'], cfg: TemplateConfig): Table {
+  const borders = gridBorders(cfg.couleurBordureTableau)
+  const bgColor = cfg.couleurEnteteTableau
+  const headerRow = new TableRow({
+    tableHeader: true,
+    children: [headerCell('Action', bgColor), headerCell('Responsable', bgColor), headerCell('Échéance', bgColor)],
+  })
+  const dataRows = actions.map((a) => new TableRow({ children: [
+    dataCell(a.description), dataCell(a.responsable), dataCell(a.echeance),
+  ]}))
+  return new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, columnWidths: [5000, 2500, 2500], borders, rows: [headerRow, ...dataRows] })
+}
+
+// ─── Helpers de paragraphe ────────────────────────────────────────────────────
+
+function bodyPara(text: string, cfg: TemplateConfig): Paragraph {
+  return new Paragraph({
+    children: [new TextRun({ text, size: hp(cfg.taillePoliceCorps), color: cfg.couleurCorps, font: cfg.policeCorps })],
+    spacing: { after: 100, line: ls(cfg.interligne), lineRule: LineRuleType.AUTO },
+    alignment: cfg.justifierCorps ? AlignmentType.BOTH : AlignmentType.LEFT,
+  })
+}
+
+function bulletPara(text: string, cfg: TemplateConfig): Paragraph {
+  return new Paragraph({
+    children: [new TextRun({ text, size: hp(cfg.taillePoliceCorps), color: cfg.couleurCorps, font: cfg.policeCorps })],
+    bullet: { level: 0 },
+    spacing: { after: 80, line: ls(cfg.interligne), lineRule: LineRuleType.AUTO },
+  })
 }
 
 function sectionLabel(label: string): Paragraph {
@@ -67,147 +401,59 @@ function sectionLabel(label: string): Paragraph {
   })
 }
 
-function contentHeading(text: string): Paragraph {
+function pvSectionHeading(numero: number, titre: string, cfg: TemplateConfig): Paragraph {
   return new Paragraph({
-    children: [
-      new TextRun({ text, bold: true, underline: { type: UnderlineType.SINGLE }, size: 24 }),
-    ],
+    children: [new TextRun({ text: `${numero}- ${titre}`, bold: true, size: hp(cfg.taillePoliceTitre2), color: cfg.couleurTitres, font: cfg.policeTitres })],
+    border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: cfg.couleurTitres, space: 4 } },
+    spacing: { before: 320, after: 160 },
+  })
+}
+
+function contentHeading(text: string, cfg: TemplateConfig): Paragraph {
+  return new Paragraph({
+    children: [new TextRun({ text, bold: true, underline: { type: UnderlineType.SINGLE }, size: hp(cfg.taillePoliceTitre2), color: cfg.couleurTitres, font: cfg.policeTitres })],
     spacing: { before: 280, after: 100 },
   })
 }
 
-function bodyParagraph(text: string): Paragraph {
-  return new Paragraph({ children: [new TextRun({ text, size: 22 })], spacing: { after: 100 } })
-}
-
-function bulletItem(text: string): Paragraph {
+function numberedItem(index: number, text: string, cfg: TemplateConfig): Paragraph {
   return new Paragraph({
-    children: [new TextRun({ text, size: 22 })],
-    bullet: { level: 0 },
-    spacing: { after: 80 },
-  })
-}
-
-function numberedItem(index: number, text: string): Paragraph {
-  return new Paragraph({
-    children: [new TextRun({ text: `${index}. ${text}`, size: 22 })],
+    children: [new TextRun({ text: `${index}. ${text}`, size: hp(cfg.taillePoliceCorps), font: cfg.policeCorps })],
     indent: { left: 360, hanging: 360 },
     spacing: { after: 80 },
   })
 }
 
-function pvSectionHeading(numero: number, titre: string): Paragraph {
-  return new Paragraph({
-    children: [
-      new TextRun({ text: `${numero}- ${titre}`, bold: true, size: 24, color: TEAL }),
-    ],
-    border: {
-      bottom: { style: BorderStyle.SINGLE, size: 6, color: TEAL, space: 4 },
-    },
-    spacing: { before: 320, after: 160 },
-  })
-}
-
-function renderPVContent(contenu: string): Paragraph[] {
+function renderPVContent(contenu: string, cfg: TemplateConfig): Paragraph[] {
   const result: Paragraph[] = []
-  const blocks = contenu.split('\n\n')
-  for (const block of blocks) {
-    const lines = block.split('\n')
-    for (const line of lines) {
+  for (const block of contenu.split('\n\n')) {
+    for (const line of block.split('\n')) {
       const stripped = line.trim()
       if (!stripped) continue
-      if (stripped.startsWith('- ')) {
-        result.push(bulletItem(stripped.slice(2)))
-      } else {
-        result.push(bodyParagraph(stripped))
-      }
+      if (stripped.startsWith('- ')) result.push(bulletPara(stripped.slice(2), cfg))
+      else result.push(bodyPara(stripped, cfg))
     }
     result.push(empty(40))
   }
   return result
 }
 
-function cell(text: string, bold = false, shaded = false): TableCell {
-  return new TableCell({
-    children: [
-      new Paragraph({
-        children: [new TextRun({ text, bold, size: 20 })],
-        spacing: { before: 60, after: 60 },
-      }),
-    ],
-    shading: shaded ? { type: ShadingType.SOLID, fill: 'E8F0F1' } : undefined,
-    margins: { top: 60, bottom: 60, left: 100, right: 100 },
-  })
+// ─── Exports utilitaires ──────────────────────────────────────────────────────
+
+export function buildDocxFilename(subject: string, date: Date): string {
+  const dateStr = format(date, 'ddMMyyyy')
+  const slug = slugify(subject)
+    .split('-')
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join('-')
+  return `PV_${dateStr}_${slug}.docx`
 }
 
-function headerCell(text: string): TableCell {
-  return new TableCell({
-    children: [
-      new Paragraph({
-        children: [new TextRun({ text, bold: true, size: 20, color: 'FFFFFF' })],
-        spacing: { before: 60, after: 60 },
-      }),
-    ],
-    shading: { type: ShadingType.SOLID, fill: TEAL },
-    margins: { top: 60, bottom: 60, left: 100, right: 100 },
-  })
+export function buildActionRows(actions: MinutesContent['actions']): [string, string, string][] {
+  return actions.map((a) => [a.description, a.responsable, a.echeance])
 }
 
-// ─── Participants table ────────────────────────────────────────────────────────
-
-function participantsTable(participants: Participant[]): Table {
-  const headerRow = new TableRow({
-    tableHeader: true,
-    children: [
-      headerCell('Nom'),
-      headerCell('Société'),
-      headerCell('Email'),
-      headerCell('Présence'),
-    ],
-  })
-
-  const dataRows = participants.map(
-    (p) =>
-      new TableRow({
-        children: [
-          cell(p.name),
-          cell(p.company ?? '—'),
-          cell(p.email),
-          cell('Visioconférence'),
-        ],
-      })
-  )
-
-  return new Table({
-    width: { size: 100, type: WidthType.PERCENTAGE },
-    columnWidths: [2800, 2200, 3000, 2000],
-    borders: GRID_BORDER,
-    rows: [headerRow, ...dataRows],
-  })
-}
-
-// ─── Actions table ─────────────────────────────────────────────────────────────
-
-function actionsTable(actions: MinutesContent['actions']): Table {
-  const headerRow = new TableRow({
-    tableHeader: true,
-    children: [headerCell('Action'), headerCell('Responsable'), headerCell('Échéance')],
-  })
-  const dataRows = actions.map(
-    (a) =>
-      new TableRow({
-        children: [cell(a.description), cell(a.responsable), cell(a.echeance)],
-      })
-  )
-  return new Table({
-    width: { size: 100, type: WidthType.PERCENTAGE },
-    columnWidths: [5000, 2500, 2500],
-    borders: GRID_BORDER,
-    rows: [headerRow, ...dataRows],
-  })
-}
-
-// ─── Main export ──────────────────────────────────────────────────────────────
+// ─── Génération principale ────────────────────────────────────────────────────
 
 export async function generateDocx(params: {
   subject: string
@@ -215,48 +461,36 @@ export async function generateDocx(params: {
   participants: Participant[]
   content: MinutesContent
   sections: TemplateSection[]
-  footerHtml?: string | null
+  template?: TemplateConfig | null
 }): Promise<Buffer> {
   const { subject, date, participants, content, sections } = params
+  const cfg: TemplateConfig = { ...DEFAULT_TEMPLATE, ...(params.template ?? {}) }
 
-  // Logo
-  const logoPath = path.join(process.cwd(), 'public', 'bl-logo.png')
-  const logoData = fs.existsSync(logoPath) ? fs.readFileSync(logoPath) : null
+  // Logo depuis base64 du template
+  const logoBuffer: Buffer | null = cfg.logoBase64
+    ? Buffer.from(cfg.logoBase64.replace(/^data:[^;]+;base64,/, ''), 'base64')
+    : null
 
-  const header = new Header({
-    children: [
-      new Paragraph({
-        alignment: AlignmentType.CENTER,
-        children: logoData
-          ? [
-              new ImageRun({ data: logoData, transformation: { width: 226, height: 100 }, type: 'png' }),
-            ]
-          : [new TextRun({ text: 'SELAS BL & ASSOCIÉS', bold: true, size: 28 })],
-        spacing: { after: 0 },
-      }),
-    ],
-  })
+  const header = buildHeader(cfg, logoBuffer)
+  const footer = buildFooter(cfg)
 
-  // ── Title block (Utsaah, teal border) ─────────────────────────────────────
-  const dateLabel = format(date, 'dd MMMM yyyy', { locale: fr }).toUpperCase()
+  // ── Bloc titre ────────────────────────────────────────────────────────────
+  const pvData = content._pv as PvContent | undefined
+  const dateLabel = pvData?.metadata.date_reunion?.toUpperCase()
+    ?? format(date, 'dd MMMM yyyy', { locale: fr }).toUpperCase()
+
+  const tealBorder = { style: BorderStyle.SINGLE, size: 18, color: cfg.couleurTitres }
   const titleBorder = {
-    top: { ...TEAL_BORDER, space: 1 },
-    left: { ...TEAL_BORDER, space: 4 },
-    bottom: { ...TEAL_BORDER, space: 1 },
-    right: { ...TEAL_BORDER, space: 4 },
+    top: { ...tealBorder, space: 1 },
+    left: { ...tealBorder, space: 4 },
+    bottom: { ...tealBorder, space: 1 },
+    right: { ...tealBorder, space: 4 },
   }
 
-  const titleBlock = [
+  const titleBlock: Paragraph[] = [
     new Paragraph({ text: '', border: titleBorder }),
     new Paragraph({
-      children: [
-        new TextRun({
-          text: `PROCES VERBAL DE REUNION DU ${dateLabel}`,
-          font: 'Utsaah',
-          size: 40,
-          bold: true,
-        }),
-      ],
+      children: [new TextRun({ text: `PROCES VERBAL DE REUNION DU ${dateLabel}`, font: 'Utsaah', size: 40, bold: true })],
       alignment: AlignmentType.CENTER,
       border: titleBorder,
       spacing: { before: 80, after: 80 },
@@ -266,12 +500,16 @@ export async function generateDocx(params: {
   ]
 
   // ── Affaire ───────────────────────────────────────────────────────────────
-  const affaireBlock = [
+  const affaireLabel = pvData
+    ? `${pvData.metadata.affaire}${pvData.metadata.type_procedure ? ` — ${pvData.metadata.type_procedure}` : ''}`
+    : subject
+
+  const affaireBlock: Paragraph[] = [
     new Paragraph({
       children: [
-        new TextRun({ text: 'Affaire', underline: { type: UnderlineType.SINGLE }, size: 28 }),
+        new TextRun({ text: 'Affaire', underline: { type: UnderlineType.SINGLE }, size: 28, font: cfg.policeTitres }),
         new TextRun({ text: ' : ', size: 28 }),
-        new TextRun({ text: subject, bold: true, size: 28 }),
+        new TextRun({ text: affaireLabel, bold: true, size: 28, color: cfg.couleurTitres, font: cfg.policeTitres }),
       ],
       spacing: { after: 200 },
     }),
@@ -279,133 +517,150 @@ export async function generateDocx(params: {
   ]
 
   // ── Modalités ─────────────────────────────────────────────────────────────
-  const modalitesBlock = [
-    sectionLabel('Modalités de tenues de la réunion'),
-    bulletItem('Réunion par visioconférence'),
+  const modalitesText = pvData?.modalites ?? 'Réunion par visioconférence'
+  const modalitesBlock: Paragraph[] = [
+    sectionLabel('Modalités de tenue de la réunion'),
+    bulletPara(modalitesText, cfg),
     empty(100),
   ]
 
+  // ── Documents amont ────────────────────────────────────────────────────────
+  const docAmontBlock: Paragraph[] = []
+  if (pvData?.documents_amont?.length) {
+    docAmontBlock.push(sectionLabel('Documents communiqués en amont'))
+    pvData.documents_amont.forEach((d) => docAmontBlock.push(bulletPara(d, cfg)))
+    docAmontBlock.push(empty(100))
+  }
+
   // ── Personnes présentes ───────────────────────────────────────────────────
-  const personnesBlock = [
+  const personnesBlock: (Paragraph | Table)[] = [
     sectionLabel('Personnes présentes'),
     empty(60),
-    participants.length > 0
-      ? participantsTable(participants)
-      : bodyParagraph('Aucun participant enregistré.'),
-    empty(200),
   ]
+  if (pvData?.participants?.length) {
+    personnesBlock.push(...participantsTableGrouped(pvData.participants, cfg))
+  } else if (participants.length > 0) {
+    personnesBlock.push(participantsTableSimple(participants, cfg))
+  } else {
+    personnesBlock.push(bodyPara('Aucun participant enregistré.', cfg))
+  }
+  personnesBlock.push(empty(200))
 
   // ── Ordre du jour ─────────────────────────────────────────────────────────
   const pvSections = content.sections?.length ? content.sections : null
-  const agendaItems = pvSections
-    ? pvSections.map((s) => s.titre)
-    : sections.map((s) => s.label)
-  const odjBlock = [
+  const agendaItems = pvSections ? pvSections.map((s) => s.titre) : sections.map((s) => s.label)
+  const odjBlock: Paragraph[] = [
     sectionLabel('Ordre du jour'),
-    ...agendaItems.map((item, i) => numberedItem(i + 1, item)),
+    ...agendaItems.map((item, i) => numberedItem(i + 1, item, cfg)),
     empty(200),
   ]
 
+  // ── Corps du PV ───────────────────────────────────────────────────────────
   const contentBlocks: (Paragraph | Table)[] = []
 
   if (pvSections) {
     for (const pvSection of pvSections) {
-      contentBlocks.push(pvSectionHeading(pvSection.numero, pvSection.titre))
-      contentBlocks.push(...renderPVContent(pvSection.contenu))
+      contentBlocks.push(pvSectionHeading(pvSection.numero, pvSection.titre, cfg))
+      contentBlocks.push(...renderPVContent(pvSection.contenu, cfg))
     }
+
+    // Points de désaccord (si disponibles)
+    if (pvData?.points_desaccord?.length) {
+      const nextNum = pvSections.length + 1
+      contentBlocks.push(pvSectionHeading(nextNum, 'Points de désaccord et points en suspens', cfg))
+      pvData.points_desaccord.forEach((p) => contentBlocks.push(bulletPara(p, cfg)))
+      contentBlocks.push(empty(120))
+    }
+
     contentBlocks.push(empty(120))
-    contentBlocks.push(contentHeading('Actions à suivre'))
+    contentBlocks.push(contentHeading('Actions à suivre', cfg))
     if (!content.actions?.length) {
-      contentBlocks.push(bodyParagraph('Aucune action à suivre.'))
+      contentBlocks.push(bodyPara('Aucune action à suivre.', cfg))
     } else {
-      contentBlocks.push(actionsTable(content.actions))
+      contentBlocks.push(actionsTable(content.actions, cfg))
     }
     contentBlocks.push(empty(80))
+
     if (content.notes?.trim()) {
-      contentBlocks.push(contentHeading('Notes complémentaires'))
-      contentBlocks.push(bodyParagraph(content.notes.trim()))
+      contentBlocks.push(contentHeading('Notes complémentaires', cfg))
+      contentBlocks.push(bodyPara(content.notes.trim(), cfg))
       contentBlocks.push(empty(80))
     }
   } else {
     for (const section of sections) {
-      contentBlocks.push(contentHeading(section.label))
-
+      contentBlocks.push(contentHeading(section.label, cfg))
       if (section.id === 'summary') {
-        const text = content.summary?.trim()
-        contentBlocks.push(bodyParagraph(text || 'Aucun résumé disponible.'))
+        contentBlocks.push(bodyPara(content.summary?.trim() || 'Aucun résumé disponible.', cfg))
       } else if (section.id === 'actions') {
-        if (!content.actions?.length) {
-          contentBlocks.push(bodyParagraph('Aucune action à suivre.'))
-        } else {
-          contentBlocks.push(actionsTable(content.actions))
-        }
+        if (!content.actions?.length) contentBlocks.push(bodyPara('Aucune action à suivre.', cfg))
+        else contentBlocks.push(actionsTable(content.actions, cfg))
       } else if (section.id === 'notes') {
         const text = content.notes?.trim()
-        if (text) contentBlocks.push(bodyParagraph(text))
-        else contentBlocks.push(bodyParagraph('—'))
+        contentBlocks.push(bodyPara(text || '—', cfg))
       } else {
         const value = content[section.id]
-        if (typeof value === 'string' && value.trim()) contentBlocks.push(bodyParagraph(value))
+        if (typeof value === 'string' && value.trim()) contentBlocks.push(bodyPara(value, cfg))
       }
-
       contentBlocks.push(empty(80))
     }
   }
 
+  // ── Points de vigilance (en fin, réservés à l'auteur) ─────────────────────
+  if (pvData?.points_vigilance?.length) {
+    contentBlocks.push(empty(200))
+    contentBlocks.push(new Paragraph({
+      children: [new TextRun({ text: '⚠ Points de vigilance — à valider avant diffusion', bold: true, size: hp(cfg.taillePoliceTitre2), color: 'B45309', font: cfg.policeTitres })],
+      spacing: { before: 200, after: 100 },
+    }))
+    pvData.points_vigilance.forEach((p) => contentBlocks.push(bulletPara(p, cfg)))
+  }
+
   // ── Signature ─────────────────────────────────────────────────────────────
-  const signatureBlock = [
+  const signataireText = pvData?.metadata.signataire
+    ? `Le ${format(date, 'dd MMMM yyyy', { locale: fr })}\t\t\t\t${pvData.metadata.signataire.toUpperCase()}`
+    : `Le ${format(date, 'dd MMMM yyyy', { locale: fr })}\t\t\t\t[ADMINISTRATEUR]`
+  const villeText = pvData?.metadata.ville_signature ?? 'PARIS'
+
+  const signatureBlock: Paragraph[] = [
     empty(400),
-    new Paragraph({
-      children: [
-        new TextRun({ text: 'Fait à ____________,', bold: true, size: 22 }),
-      ],
-    }),
-    new Paragraph({
-      children: [
-        new TextRun({ text: `Le ${format(date, 'dd MMMM yyyy', { locale: fr })}`, bold: true, size: 22 }),
-        new TextRun({ text: '\t\t\t\t\t\t\t\t', size: 22 }),
-        new TextRun({ text: '[ADMINISTRATEUR]', bold: true, size: 22 }),
-      ],
-    }),
+    new Paragraph({ children: [new TextRun({ text: `Fait à ${villeText},`, bold: true, size: hp(cfg.taillePoliceCorps) })] }),
+    new Paragraph({ children: [new TextRun({ text: signataireText, bold: true, size: hp(cfg.taillePoliceCorps) })] }),
   ]
 
-  // ── Annexes (page 2) ──────────────────────────────────────────────────────
-  const annexesBlock = [
+  // ── Annexes ───────────────────────────────────────────────────────────────
+  const annexesBlock: Paragraph[] = [
     new Paragraph({ children: [new PageBreak()] }),
-    new Paragraph({
-      children: [new TextRun({ text: 'Annexe 1 : ', bold: true, size: 22 })],
-      spacing: { after: 200 },
-    }),
-    new Paragraph({
-      children: [new TextRun({ text: 'Annexe 2 : ', bold: true, size: 22 })],
-      spacing: { after: 200 },
-    }),
-    new Paragraph({
-      children: [new TextRun({ text: 'Annexe 3 : ', bold: true, size: 22 })],
-    }),
+    new Paragraph({ children: [new TextRun({ text: 'Annexe 1 : ', bold: true, size: hp(cfg.taillePoliceCorps) })], spacing: { after: 200 } }),
+    new Paragraph({ children: [new TextRun({ text: 'Annexe 2 : ', bold: true, size: hp(cfg.taillePoliceCorps) })], spacing: { after: 200 } }),
+    new Paragraph({ children: [new TextRun({ text: 'Annexe 3 : ', bold: true, size: hp(cfg.taillePoliceCorps) })] }),
   ]
 
   const doc = new Document({
-    sections: [
-      {
-        headers: { default: header },
-        properties: {
-          page: {
-            margin: { top: 1134, right: 1183, bottom: 1135, left: 1418 },
+    sections: [{
+      headers: { default: header },
+      footers: { default: footer },
+      properties: {
+        page: {
+          margin: {
+            top: cm2twip(cfg.margeHautCm),
+            bottom: cm2twip(cfg.margeBasCm),
+            left: cm2twip(cfg.margeGaucheCm),
+            right: cm2twip(cfg.margeDroiteCm),
           },
         },
-        children: [
-          ...titleBlock,
-          ...affaireBlock,
-          ...modalitesBlock,
-          ...personnesBlock,
-          ...odjBlock,
-          ...contentBlocks,
-          ...signatureBlock,
-          ...annexesBlock,
-        ],
       },
-    ],
+      children: [
+        ...titleBlock,
+        ...affaireBlock,
+        ...modalitesBlock,
+        ...docAmontBlock,
+        ...personnesBlock,
+        ...odjBlock,
+        ...contentBlocks,
+        ...signatureBlock,
+        ...annexesBlock,
+      ],
+    }],
   })
 
   return Buffer.from(await Packer.toBuffer(doc))

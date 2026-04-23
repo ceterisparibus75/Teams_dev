@@ -34,17 +34,13 @@ export async function GET(
   })
   if (!minutes) return NextResponse.json({ error: 'Introuvable' }, { status: 404 })
 
-  const sections: TemplateSection[] = minutes.template
-    ? (minutes.template.sections as unknown as TemplateSection[])
-    : DEFAULT_SECTIONS
-
   const docxBuffer = await generateDocx({
     subject: minutes.meeting.subject,
     date: minutes.meeting.startDateTime,
     participants: minutes.meeting.participants,
     content: minutes.content as MinutesContent,
-    sections,
-    footerHtml: minutes.template?.footerHtml,
+    sections: DEFAULT_SECTIONS,
+    template: minutes.template,
   })
 
   const filename = buildDocxFilename(minutes.meeting.subject, minutes.meeting.startDateTime)

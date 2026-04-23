@@ -1,5 +1,6 @@
 import 'next-auth'
 import 'next-auth/jwt'
+import type { UserRole } from '@prisma/client'
 
 declare module 'next-auth' {
   interface Session {
@@ -7,6 +8,7 @@ declare module 'next-auth' {
       id: string
       name: string
       email: string
+      role: UserRole
     }
     accessToken?: string
   }

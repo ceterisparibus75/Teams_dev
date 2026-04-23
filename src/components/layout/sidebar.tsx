@@ -1,15 +1,17 @@
 'use client'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { LayoutDashboard, Video, FileText, Settings, LogOut } from 'lucide-react'
+import { LayoutDashboard, Video, FileText, Settings, LogOut, FolderOpen, Bot } from 'lucide-react'
 import { signOut } from 'next-auth/react'
 import { cn } from '@/lib/utils'
 
 const nav = [
   { href: '/dashboard',      label: 'Tableau de bord', icon: LayoutDashboard },
-  { href: '/reunions',       label: 'Réunions Teams',  icon: Video },
-  { href: '/comptes-rendus', label: 'Comptes rendus',  icon: FileText },
-  { href: '/parametres',     label: 'Paramètres',      icon: Settings },
+  { href: '/dossiers',       label: 'Dossiers',         icon: FolderOpen },
+  { href: '/reunions',       label: 'Réunions Teams',   icon: Video },
+  { href: '/comptes-rendus', label: 'Comptes rendus',   icon: FileText },
+  { href: '/parametres',     label: 'Templates',        icon: Settings },
+  { href: '/prompts',        label: 'Prompts IA',       icon: Bot },
 ]
 
 export function Sidebar() {

@@ -8,81 +8,25 @@ datasource db {
   directUrl = env("DIRECT_URL")
 }
 
-model User {
-  id                    String                @id @default(cuid())
-  email                 String                @unique
-  name                  String
-  microsoftId           String?               @unique
-  microsoftAccessToken  String?
-  microsoftRefreshToken String?
-  microsoftTokenExpiry  DateTime?
-  organizedMeetings     Meeting[]
-  collaborations        MeetingCollaborator[]
-  minutes               MeetingMinutes[]
-  createdAt             DateTime              @default(now())
+// ─── Enums ───────────────────────────────────────────────────────────────────
+
+enum UserRole {
+  ADMIN
+  ADMINISTRATEUR_JUDICIAIRE
+  COLLABORATEUR
 }
 
-model Meeting {
-  id               String                @id
-  subject          String
-  startDateTime    DateTime
-  endDateTime      DateTime
-  organizerId      String
-  joinUrl          String?
-  organizer        User                  @relation(fields: [organizerId], references: [id])
-  participants     MeetingParticipant[]
-  collaborators    MeetingCollaborator[]
-  hasTranscription Boolean               @default(false)
-  processedAt      DateTime?
-  minutes          MeetingMinutes?
-  createdAt        DateTime              @default(now())
-  platform         MeetingPlatform       @default(TEAMS_INTERNAL)
-  externalUrl      String?
-  botStatus        BotStatus?
-  botScheduledAt   DateTime?
+enum TypeProcedure {
+  MANDAT_AD_HOC
+  CONCILIATION
+  REDRESSEMENT_JUDICIAIRE
+  SAUVEGARDE
 }
 
-model MeetingParticipant {
-  id        String  @id @default(cuid())
-  meetingId String
-  meeting   Meeting @relation(fields: [meetingId], references: [id], onDelete: Cascade)
-  name      String
-  email     String
-  company   String?
-}
-
-model MeetingCollaborator {
-  meetingId String
-  userId    String
-  meeting   Meeting @relation(fields: [meetingId], references: [id], onDelete: Cascade)
-  user      User    @relation(fields: [userId], references: [id])
-  @@id([meetingId, userId])
-}
-
-model MeetingMinutes {
-  id         String        @id @default(cuid())
-  meetingId  String        @unique
-  meeting    Meeting       @relation(fields: [meetingId], references: [id])
-  authorId   String
-  author     User          @relation(fields: [authorId], references: [id])
-  templateId String?
-  template   Template?     @relation(fields: [templateId], references: [id])
-  status     MinutesStatus @default(DRAFT)
-  content    Json
-  sentAt     DateTime?
-  createdAt  DateTime      @default(now())
-  updatedAt  DateTime      @updatedAt
-}
-
-model Template {
-  id         String           @id @default(cuid())
-  name       String
-  sections   Json
-  headerHtml String?
-  footerHtml String?
-  isDefault  Boolean          @default(false)
-  minutes    MeetingMinutes[]
-  createdAt  DateTime         @default(now())
+enum StatutDossier {
+  EN_COURS
+  CLOS
+  ARCHIVE
 }
 
 enum MinutesStatus {
@@ -106,4 +50,183 @@ enum BotStatus {
   PROCESSING
   DONE
   FAILED
+}
+
+// ─── Modèles ─────────────────────────────────────────────────────────────────
+
+model User {
+  id                    String                @id @default(cuid())
+  email                 String                @unique
+  name                  String
+  role                  UserRole              @default(COLLABORATEUR)
+  microsoftId           String?               @unique
+  microsoftAccessToken  String?
+  microsoftRefreshToken String?
+  microsoftTokenExpiry  DateTime?
+  createdAt             DateTime              @default(now())
+
+  organizedMeetings     Meeting[]
+  collaborations        MeetingCollaborator[]
+  minutes               MeetingMinutes[]
+  dossiers              Dossier[]
+  prompts               Prompt[]
+}
+
+model Dossier {
+  id            String        @id @default(cuid())
+  reference     String        @unique
+  denomination  String
+  typeProcedure TypeProcedure
+  statut        StatutDossier @default(EN_COURS)
+  createdById   String
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  createdBy     User          @relation(fields: [createdById], references: [id])
+  meetings      Meeting[]
+
+  @@index([denomination])
+}
+
+model Meeting {
+  id               String                @id
+  subject          String
+  startDateTime    DateTime
+  endDateTime      DateTime
+  organizerId      String
+  joinUrl          String?
+  hasTranscription Boolean               @default(false)
+  processedAt      DateTime?
+  platform         MeetingPlatform       @default(TEAMS_INTERNAL)
+  externalUrl      String?
+  botStatus        BotStatus?
+  botScheduledAt   DateTime?
+  dossierId        String?
+  createdAt        DateTime              @default(now())
+
+  organizer        User                  @relation(fields: [organizerId], references: [id])
+  dossier          Dossier?              @relation(fields: [dossierId], references: [id])
+  participants     MeetingParticipant[]
+  collaborators    MeetingCollaborator[]
+  minutes          MeetingMinutes?
+
+  @@index([dossierId])
+}
+
+model MeetingParticipant {
+  id        String  @id @default(cuid())
+  meetingId String
+  meeting   Meeting @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  name      String
+  email     String
+  company   String?
+}
+
+model MeetingCollaborator {
+  meetingId String
+  userId    String
+  meeting   Meeting @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  user      User    @relation(fields: [userId], references: [id])
+
+  @@id([meetingId, userId])
+}
+
+model MeetingMinutes {
+  id         String        @id @default(cuid())
+  meetingId  String        @unique
+  meeting    Meeting       @relation(fields: [meetingId], references: [id])
+  authorId   String
+  author     User          @relation(fields: [authorId], references: [id])
+  templateId String?
+  template   Template?     @relation(fields: [templateId], references: [id])
+  promptId   String?
+  prompt     Prompt?       @relation(fields: [promptId], references: [id])
+  status     MinutesStatus @default(DRAFT)
+  content    Json
+  sentAt     DateTime?
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
+}
+
+model Template {
+  id   String @id @default(cuid())
+  name String
+
+  // État
+  isDefault Boolean @default(false)
+  isActive  Boolean @default(true)
+
+  // Logo (PNG/JPG encodé en base64, stocké en BDD)
+  logoBase64       String? @db.Text
+  logoLargeurCm    Float   @default(3.0)
+
+  // En-tête
+  enteteTexteLignes  String[] @default([])
+  enteteAlignement   String   @default("droite")
+
+  // Pied de page
+  piedPageLignes      String[] @default([])
+  piedPageAlignement  String   @default("centre")
+  numeroterPages      Boolean  @default(true)
+  formatNumerotation  String   @default("Page {n} sur {total}")
+
+  // Polices
+  policeCorps        String @default("Cambria")
+  taillePoliceCorps  Int    @default(11)
+  policeTitres       String @default("Cambria")
+  taillePoliceTitre1 Int    @default(14)
+  taillePoliceTitre2 Int    @default(12)
+
+  // Couleurs (hex sans #)
+  couleurTitres         String @default("1F3864")
+  couleurCorps          String @default("000000")
+  couleurEnteteCabinet  String @default("1F3864")
+  couleurEnteteTableau  String @default("D9E2F3")
+  couleurBordureTableau String @default("BFBFBF")
+
+  // Marges (en cm)
+  margeHautCm   Float @default(2.5)
+  margeBasCm    Float @default(2.5)
+  margeGaucheCm Float @default(2.5)
+  margeDroiteCm Float @default(2.5)
+
+  // Mise en page
+  interligne     Float   @default(1.15)
+  justifierCorps Boolean @default(true)
+
+  createdAt DateTime         @default(now())
+  minutes   MeetingMinutes[]
+}
+
+model Prompt {
+  id           String @id @default(cuid())
+  nom          String
+  typeDocument String @default("pv_reunion")
+  contenu      String @db.Text
+  version      Int    @default(1)
+  isActive     Boolean @default(true)
+  modeleClaude String  @default("claude-opus-4-7")
+  createdAt    DateTime @default(now())
+  createdById  String
+
+  createdBy User             @relation(fields: [createdById], references: [id])
+  minutes   MeetingMinutes[]
+
+  @@index([typeDocument, isActive])
+}
+
+model GenerationAuditLog {
+  id             String   @id @default(cuid())
+  minutesId      String?
+  userId         String
+  modele         String
+  tokensInput    Int
+  tokensOutput   Int
+  transcriptHash String
+  durationMs     Int
+  status         String
+  errorMessage   String?  @db.Text
+  createdAt      DateTime @default(now())
+
+  @@index([userId, createdAt])
 }

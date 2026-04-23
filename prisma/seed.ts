@@ -13,13 +13,16 @@ async function main() {
     data: {
       name: 'Standard BL & Associés',
       isDefault: true,
-      sections: [
-        { id: 'summary',   label: 'Résumé',               type: 'text',  aiGenerated: true  },
-        { id: 'decisions', label: 'Décisions',             type: 'list',  aiGenerated: true  },
-        { id: 'actions',   label: 'Actions à suivre',      type: 'table', aiGenerated: true  },
-        { id: 'notes',     label: 'Notes complémentaires', type: 'text',  aiGenerated: false },
-      ],
-      footerHtml: 'SELAS BL & Associés — Administrateurs Judiciaires',
+      isActive: true,
+      enteteTexteLignes: ['SELAS BL & Associés', 'Administrateurs Judiciaires'],
+      enteteAlignement: 'droite',
+      piedPageLignes: ['SELAS BL & Associés — Administrateurs Judiciaires et Mandataires'],
+      piedPageAlignement: 'centre',
+      numeroterPages: true,
+      couleurTitres: '70989C',
+      couleurEnteteCabinet: '70989C',
+      couleurEnteteTableau: 'E8F0F1',
+      couleurBordureTableau: 'D0E4E5',
     },
   })
   console.log('✓ Template par défaut créé')

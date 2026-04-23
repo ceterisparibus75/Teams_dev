@@ -122,7 +122,12 @@ export async function POST(
     )
   }
 
-  const content = await generateMinutesContent(meeting.subject, transcriptResult.transcription, meeting.participants)
+  const content = await generateMinutesContent(
+    meeting.subject,
+    transcriptResult.transcription,
+    meeting.participants,
+    { userId: session.user.id, minutesId: existingMinutes.id }
+  )
 
   await prisma.meetingMinutes.update({
     where: { meetingId },

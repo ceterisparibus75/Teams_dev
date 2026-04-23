@@ -14,14 +14,17 @@ export async function POST(req: NextRequest) {
   const session = await getServerSession(authOptions)
   if (!session?.user?.id) return NextResponse.json({ error: 'Non autorisé' }, { status: 401 })
 
-  const { name, sections, footerHtml, isDefault } = await req.json()
+  const body = await req.json()
+  const { name, isDefault, isActive, ...rest } = body
+
+  if (!name?.trim()) return NextResponse.json({ error: 'Nom requis' }, { status: 400 })
 
   if (isDefault) {
     await prisma.template.updateMany({ data: { isDefault: false } })
   }
 
   const template = await prisma.template.create({
-    data: { name, sections, footerHtml, isDefault: !!isDefault },
+    data: { name: name.trim(), isDefault: !!isDefault, isActive: isActive !== false, ...rest },
   })
-  return NextResponse.json(template)
+  return NextResponse.json(template, { status: 201 })
 }
