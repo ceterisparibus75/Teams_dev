@@ -94,7 +94,7 @@ export async function POST(
         meetingSubject,
         transcription,
         participants,
-        { userId, minutesId }
+        { userId, minutesId, meetingDate: startDateTime ?? undefined }
       )
       await prisma.meetingMinutes.update({
         where: { id: minutesId },

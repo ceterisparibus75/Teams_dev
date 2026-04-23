@@ -272,8 +272,13 @@ const MAX_TAIL_CHARS = 10_000
 export function buildPrompt(
   subject: string,
   transcription: string | null,
-  participants?: Array<{ name: string }>
+  participants?: Array<{ name: string }>,
+  date?: Date
 ): string {
+  const dateStr = date
+    ? date.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
+    : null
+  const dateBlock = dateStr ? `\nDate de la réunion : ${dateStr}` : ''
   const participantsBlock = participants?.length
     ? `\nParticipants identifiés : ${participants.map((p) => p.name).join(', ')}`
     : ''
@@ -288,7 +293,7 @@ export function buildPrompt(
   const transcriptionBlock = safeTranscription
     ? `TRANSCRIPTION DE LA RÉUNION :\n\n${safeTranscription}`
     : `Note : aucune transcription disponible. Remplis uniquement ce qui est déductible du sujet et des participants.`
-  return `Affaire : "${subject}"${participantsBlock}\n\n${transcriptionBlock}`
+  return `Affaire : "${subject}"${dateBlock}${participantsBlock}\n\n${transcriptionBlock}`
 }
 
 // ─── Parser texte (conservé pour les tests + fallback) ───────────────────────
@@ -343,12 +348,12 @@ export async function generateMinutesContent(
   subject: string,
   transcription: string | null,
   participants?: Array<{ name: string }>,
-  options?: { userId?: string; minutesId?: string; promptText?: string; modelName?: string }
+  options?: { userId?: string; minutesId?: string; promptText?: string; modelName?: string; meetingDate?: Date }
 ): Promise<MinutesContent> {
   const client = getClient()
   const model = options?.modelName ?? 'claude-opus-4-7'
   const systemPrompt = options?.promptText ?? SYSTEM_PROMPT
-  const userMessage = buildPrompt(subject, transcription, participants)
+  const userMessage = buildPrompt(subject, transcription, participants, options?.meetingDate)
   const startMs = Date.now()
 
   let tokensInput = 0

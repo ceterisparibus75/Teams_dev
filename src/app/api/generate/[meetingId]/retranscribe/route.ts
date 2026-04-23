@@ -137,7 +137,7 @@ export async function POST(
       meeting.subject,
       transcriptResult.transcription,
       meeting.participants,
-      { userId: session.user.id, minutesId: existingMinutes.id, promptText: customPromptText, modelName: customModelName }
+      { userId: session.user.id, minutesId: existingMinutes.id, promptText: customPromptText, modelName: customModelName, meetingDate: meeting.startDateTime ?? undefined }
     )
   } catch (genError) {
     const msg = genError instanceof Error ? genError.message : 'Erreur inconnue'
