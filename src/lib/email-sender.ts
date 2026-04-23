@@ -11,22 +11,35 @@ export interface SendMinutesParams {
   docxFilename: string
 }
 
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
+function formatHtmlText(value: string): string {
+  return escapeHtml(value).replace(/\r?\n/g, '<br/>')
+}
+
 function buildHtmlBody(subject: string, content: MinutesContent): string {
   const actionsHtml = content.actions.length
     ? `<table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;width:100%">
         <tr style="background:#E5E7EB"><th>Description</th><th>Responsable</th><th>Échéance</th></tr>
         ${content.actions
-          .map((a) => `<tr><td>${a.description}</td><td>${a.responsable}</td><td>${a.echeance}</td></tr>`)
+          .map((a) => `<tr><td>${formatHtmlText(a.description)}</td><td>${formatHtmlText(a.responsable)}</td><td>${formatHtmlText(a.echeance)}</td></tr>`)
           .join('')}
        </table>`
     : '<p><em>Aucune action à suivre.</em></p>'
 
   return `
     <div style="font-family:Arial,sans-serif;max-width:700px">
-      <h2 style="color:#1F2937">Compte rendu — ${subject}</h2>
-      <p>${content.summary}</p>
+      <h2 style="color:#1F2937">Compte rendu — ${escapeHtml(subject)}</h2>
+      <p>${formatHtmlText(content.summary)}</p>
       <h3>Actions à suivre</h3>${actionsHtml}
-      ${content.notes ? `<h3>Notes complémentaires</h3><p>${content.notes}</p>` : ''}
+      ${content.notes ? `<h3>Notes complémentaires</h3><p>${formatHtmlText(content.notes)}</p>` : ''}
       <hr/>
       <p style="color:#6B7280;font-size:12px">SELAS BL & Associés — Administrateurs Judiciaires</p>
     </div>`

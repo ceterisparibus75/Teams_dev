@@ -52,8 +52,25 @@ export async function PATCH(
   const { content, status } = await req.json()
 
   try {
+    const accessibleMinutes = await prisma.meetingMinutes.findFirst({
+      where: {
+        id,
+        meeting: {
+          OR: [
+            { organizerId: session.user.id },
+            { collaborators: { some: { userId: session.user.id } } },
+          ],
+        },
+      },
+      select: { id: true },
+    })
+
+    if (!accessibleMinutes) {
+      return NextResponse.json({ error: 'Introuvable' }, { status: 404 })
+    }
+
     const updated = await prisma.meetingMinutes.update({
-      where: { id },
+      where: { id: accessibleMinutes.id },
       data: {
         ...(content !== undefined && { content }),
         ...(status !== undefined && { status }),
