@@ -47,7 +47,7 @@ export async function POST(
   if (existingMinutes) {
     savedMinutes = await prisma.meetingMinutes.update({
       where: { meetingId },
-      data: { content: skeletonWithFlag },
+      data: { content: skeletonWithFlag, isGenerating: true },
     })
   } else {
     savedMinutes = await prisma.meetingMinutes.create({
@@ -56,6 +56,7 @@ export async function POST(
         authorId: userId,
         templateId: defaultTemplate?.id ?? null,
         content: skeletonWithFlag,
+        isGenerating: true,
         status: 'DRAFT',
       },
     })
@@ -84,7 +85,10 @@ export async function POST(
         const fallback = createSkeletonContent(meetingSubject, participants, startDateTime)
         await prisma.meetingMinutes.update({
           where: { id: minutesId },
-          data: { content: { ...(fallback as object), _generating: false } as Prisma.InputJsonValue },
+          data: {
+            isGenerating: false,
+            content: { ...(fallback as object), _generating: false } as Prisma.InputJsonValue,
+          },
         })
         return
       }
@@ -98,7 +102,10 @@ export async function POST(
       )
       await prisma.meetingMinutes.update({
         where: { id: minutesId },
-        data: { content: { ...(content as object), _generating: false } as Prisma.InputJsonValue },
+        data: {
+          isGenerating: false,
+          content: { ...(content as object), _generating: false } as Prisma.InputJsonValue,
+        },
       })
       console.log(`[generate/after] ✓ CR généré — minutesId=${minutesId}`)
     } catch (error) {
@@ -108,6 +115,7 @@ export async function POST(
       await prisma.meetingMinutes.update({
         where: { id: minutesId },
         data: {
+          isGenerating: false,
           content: {
             ...(fallback as object),
             _generating: false,

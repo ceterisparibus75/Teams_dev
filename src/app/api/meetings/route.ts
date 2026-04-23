@@ -39,46 +39,52 @@ export async function GET(req: NextRequest) {
       // La table dossier n'est pas encore disponible — on continue sans auto-association
     }
 
+    // Récupère tous les IDs existants en une seule requête (évite N+1)
+    const existingIds = new Set(
+      (await prisma.meeting.findMany({
+        where: { id: { in: graphMeetings.map((m) => m.id) } },
+        select: { id: true },
+      })).map((m) => m.id)
+    )
+
     for (const gm of graphMeetings) {
-      const existing = await prisma.meeting.findUnique({ where: { id: gm.id } })
-      if (!existing) {
-        // Cherche un dossier dont la dénomination apparaît dans le sujet de la réunion
-        const subjectLower = gm.subject.toLowerCase()
-        const matchedDossier = dossiers.find((d) =>
-          subjectLower.includes(d.denomination.toLowerCase())
-        )
+      if (existingIds.has(gm.id)) continue
 
-        await prisma.meeting.create({
-          data: {
-            id: gm.id,
-            subject: gm.subject,
-            startDateTime: new Date(gm.startDateTime),
-            endDateTime: new Date(gm.endDateTime),
-            organizerId: session.user.id,
-            joinUrl: gm.joinUrl ?? null,
-            dossierId: matchedDossier?.id ?? null,
-            participants: {
-              create: gm.attendees.map((a) => ({
-                name: a.emailAddress.name,
-                email: a.emailAddress.address,
-              })),
-            },
+      // Cherche un dossier dont la dénomination apparaît dans le sujet de la réunion
+      const subjectLower = gm.subject.toLowerCase()
+      const matchedDossier = dossiers.find((d) =>
+        subjectLower.includes(d.denomination.toLowerCase())
+      )
+
+      await prisma.meeting.create({
+        data: {
+          id: gm.id,
+          subject: gm.subject,
+          startDateTime: new Date(gm.startDateTime),
+          endDateTime: new Date(gm.endDateTime),
+          organizerId: session.user.id,
+          joinUrl: gm.joinUrl ?? null,
+          dossierId: matchedDossier?.id ?? null,
+          participants: {
+            create: gm.attendees.map((a) => ({
+              name: a.emailAddress.name,
+              email: a.emailAddress.address,
+            })),
           },
-        })
+        },
+      })
 
-        // Link firm members who attended
-        const attendeeEmails = gm.attendees.map((a) => a.emailAddress.address.toLowerCase())
-        const firmMembers = await prisma.user.findMany({
-          where: { email: { in: attendeeEmails } },
-          select: { id: true },
+      // Link firm members who attended (batch au lieu de N upserts séquentiels)
+      const attendeeEmails = gm.attendees.map((a) => a.emailAddress.address.toLowerCase())
+      const firmMembers = await prisma.user.findMany({
+        where: { email: { in: attendeeEmails } },
+        select: { id: true },
+      })
+      if (firmMembers.length > 0) {
+        await prisma.meetingCollaborator.createMany({
+          data: firmMembers.map((m) => ({ meetingId: gm.id, userId: m.id })),
+          skipDuplicates: true,
         })
-        for (const member of firmMembers) {
-          await prisma.meetingCollaborator.upsert({
-            where: { meetingId_userId: { meetingId: gm.id, userId: member.id } },
-            update: {},
-            create: { meetingId: gm.id, userId: member.id },
-          })
-        }
       }
     }
 
@@ -101,7 +107,7 @@ export async function GET(req: NextRequest) {
         botStatus: true,
         botScheduledAt: true,
         participants: { select: { name: true, email: true } },
-        minutes: { select: { id: true, status: true, content: true } },
+        minutes: { select: { id: true, status: true, isGenerating: true } },
       },
       orderBy: { startDateTime: 'desc' },
       take: 30,
@@ -143,7 +149,7 @@ export async function GET(req: NextRequest) {
         minutes: m.minutes ? {
           id: m.minutes.id,
           status: m.minutes.status,
-          generating: (m.minutes.content as Record<string, unknown>)?._generating === true,
+          generating: m.minutes.isGenerating,
         } : null,
       }))
     )

@@ -45,17 +45,16 @@ export async function GET(req: NextRequest) {
         },
       })
 
-      // Link firm members
+      // Link firm members (batch)
       const attendeeEmails = gm.attendees.map((a) => a.emailAddress.address.toLowerCase())
       const firmMembers = await prisma.user.findMany({
         where: { email: { in: attendeeEmails } },
         select: { id: true },
       })
-      for (const member of firmMembers) {
-        await prisma.meetingCollaborator.upsert({
-          where: { meetingId_userId: { meetingId: gm.id, userId: member.id } },
-          update: {},
-          create: { meetingId: gm.id, userId: member.id },
+      if (firmMembers.length > 0) {
+        await prisma.meetingCollaborator.createMany({
+          data: firmMembers.map((m) => ({ meetingId: gm.id, userId: m.id })),
+          skipDuplicates: true,
         })
       }
 

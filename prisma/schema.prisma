@@ -71,6 +71,8 @@ model User {
   validatedMinutes      MeetingMinutes[]      @relation("ValidatedBy")
   dossiers              Dossier[]
   prompts               Prompt[]
+
+  @@index([microsoftRefreshToken])
 }
 
 model Dossier {
@@ -112,6 +114,7 @@ model Meeting {
   minutes          MeetingMinutes?
 
   @@index([dossierId])
+  @@index([organizerId])
 }
 
 model MeetingParticipant {
@@ -130,6 +133,7 @@ model MeetingCollaborator {
   user      User    @relation(fields: [userId], references: [id])
 
   @@id([meetingId, userId])
+  @@index([userId])
 }
 
 model MeetingMinutes {
@@ -143,6 +147,7 @@ model MeetingMinutes {
   promptId   String?
   prompt     Prompt?       @relation(fields: [promptId], references: [id])
   status          MinutesStatus @default(DRAFT)
+  isGenerating    Boolean       @default(false)
   content         Json
   sentAt          DateTime?
   validatedById   String?
@@ -200,6 +205,8 @@ model Template {
 
   createdAt DateTime         @default(now())
   minutes   MeetingMinutes[]
+
+  @@index([isDefault])
 }
 
 model Prompt {
