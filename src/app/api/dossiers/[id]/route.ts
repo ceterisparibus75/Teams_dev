@@ -22,15 +22,28 @@ export async function GET(
           id: true,
           subject: true,
           startDateTime: true,
+          endDateTime: true,
           hasTranscription: true,
-          minutes: { select: { id: true, status: true } },
+          minutes: { select: { id: true, status: true, content: true } },
         },
       },
     },
   })
 
   if (!dossier) return NextResponse.json({ error: 'Introuvable' }, { status: 404 })
-  return NextResponse.json(dossier)
+
+  const meetings = dossier.meetings.map((m) => {
+    const content = m.minutes?.content as Record<string, unknown> | null
+    const summary = typeof content?.summary === 'string' && content.summary.trim()
+      ? content.summary.trim().slice(0, 250)
+      : null
+    return {
+      ...m,
+      minutes: m.minutes ? { id: m.minutes.id, status: m.minutes.status, summary } : null,
+    }
+  })
+
+  return NextResponse.json({ ...dossier, meetings })
 }
 
 export async function PATCH(

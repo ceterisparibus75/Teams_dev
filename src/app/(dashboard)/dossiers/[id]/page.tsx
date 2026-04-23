@@ -37,8 +37,18 @@ interface MeetingRef {
   id: string
   subject: string
   startDateTime: string
+  endDateTime: string
   hasTranscription: boolean
-  minutes: { id: string; status: string } | null
+  minutes: { id: string; status: string; summary: string | null } | null
+}
+
+function formatDuration(start: string, end: string): string {
+  const totalMinutes = Math.round((new Date(end).getTime() - new Date(start).getTime()) / 60000)
+  if (totalMinutes <= 0) return ''
+  if (totalMinutes < 60) return `${totalMinutes} min`
+  const h = Math.floor(totalMinutes / 60)
+  const m = totalMinutes % 60
+  return m > 0 ? `${h}h${m.toString().padStart(2, '0')}` : `${h}h`
 }
 
 interface DossierData {
@@ -276,13 +286,26 @@ export default function DossierDetailPage() {
             return (
               <div
                 key={m.id}
-                className="flex items-center justify-between bg-white border border-gray-200 rounded-xl px-5 py-3.5"
+                className="flex items-start justify-between bg-white border border-gray-200 rounded-xl px-5 py-3.5 gap-4"
               >
-                <div className="space-y-0.5">
+                <div className="min-w-0 space-y-1 flex-1">
                   <p className="text-sm font-medium text-gray-900">{m.subject}</p>
-                  <p className="text-xs text-gray-400">{formatDateTime(m.startDateTime)}</p>
+                  <p className="text-xs text-gray-400">
+                    {formatDateTime(m.startDateTime)}
+                    {m.endDateTime && (
+                      <span className="ml-2 text-gray-300">·</span>
+                    )}
+                    {m.endDateTime && (
+                      <span className="ml-2">{formatDuration(m.startDateTime, m.endDateTime)}</span>
+                    )}
+                  </p>
+                  {m.minutes?.summary && (
+                    <p className="text-xs text-gray-500 leading-relaxed line-clamp-4 pt-0.5">
+                      {m.minutes.summary}
+                    </p>
+                  )}
                 </div>
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-3 flex-shrink-0 mt-0.5">
                   {ms && <Badge variant={ms.variant}>{ms.label}</Badge>}
                   {latestMinutes ? (
                     <Link
