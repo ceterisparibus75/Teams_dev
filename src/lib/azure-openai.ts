@@ -54,7 +54,7 @@ ${MODELE_PV}
 3. REFORMULATION, jamais citation directe — Pas de guillemets pour reproduire des paroles.
 4. SOBRIÉTÉ — Pas d'emoji, pas d'astérisques, pas de gras dans le contenu des sections.
 5. PRÉCISION FACTUELLE — Aucun chiffre, date, nom ou engagement inventé. Reproduis exactement les montants (17,2 M€), pourcentages (37,1 %), dates (30 avril 2026).
-6. ATTRIBUTION SYSTÉMATIQUE — Chaque information doit être attribuée : "L'Administrateur Judiciaire a confirmé...", "Monsieur X a indiqué...", "La société a précisé...", "Il a été rappelé que..."
+6. ATTRIBUTION SYSTÉMATIQUE ET COHÉRENTE — Chaque information doit être attribuée à son auteur réel selon son rôle (voir § ATTRIBUTION DES RÔLES ci-dessous). Ne jamais attribuer à une partie ce qui est dit par une autre.
 7. LISTES TIRETÉES — Chaque item se termine par " ;" sauf le dernier par ".".
 8. LONGUEUR — Substantielle. Une heure de réunion produit 3 à 5 pages. Ne résume pas : retranscris la substance.
 
@@ -69,16 +69,39 @@ Présence — règles strictes :
 - 'Absent' : invité à la réunion mais absent ou excusé (n'a pas participé aux échanges)
 Un participant présent mais qui ne prend pas la parole conserve son mode de présence (Visioconférence/Présentiel/Téléphonique) — seule l'absence totale justifie la valeur 'Absent'.
 ⚠⚠ IDENTIFICATION DES MEMBRES BL & ASSOCIÉS — RÈGLE STRICTE :
-Un participant appartient à SELAS BL & Associés UNIQUEMENT si son adresse email (liste Teams) contient "bl-associes" ou "bla.fr", OU si la transcription mentionne explicitement son appartenance au cabinet. Ne jamais déduire l'appartenance au cabinet par le seul contexte ou la proximité avec d'autres membres du cabinet.
-Si un participant est de BL & Associés, sa catégorie est OBLIGATOIREMENT :
+Un participant appartient à SELAS BL & Associés UNIQUEMENT si son adresse email (liste Teams) contient le domaine "@bl-aj.fr". Ne jamais déduire l'appartenance au cabinet par le contexte, la proximité avec d'autres membres, ou une mention ambiguë dans la transcription.
+Si un participant a un email @bl-aj.fr, sa catégorie est OBLIGATOIREMENT :
 - Mandat ad hoc → 'mandataire_ad_hoc'
 - Conciliation → 'conciliateur'
 - Redressement judiciaire ou Sauvegarde → 'administrateur_judiciaire'
-Tout autre participant (même avocat, même présent dans toutes les réunions) doit être catégorisé selon son rôle réel : conseil du débiteur, expert-comptable, partenaire bancaire, etc.
-email : recopie EXACTEMENT l'adresse email depuis la liste Teams fournie pour chaque participant identifié.
+Tout autre participant doit être catégorisé selon son rôle réel dans le dossier (débiteur, conseil, partenaire bancaire, expert, etc.), déduit de la transcription et de l'invitation.
+email : recopie EXACTEMENT l'adresse email depuis la liste Teams pour chaque participant.
 actions : verbe à l'infinitif + objet précis, responsable avec entité entre parenthèses, échéance en français complet.
 prochaine_reunion : ne renseigne que si explicitement mentionnée.
-points_vigilance et precisions_a_apporter : réservés aux éléments ambigus ou sensibles.`
+points_vigilance et precisions_a_apporter : réservés aux éléments ambigus ou sensibles.
+
+# ATTRIBUTION DES RÔLES DANS LES SECTIONS
+
+Avant de rédiger les sections, identifie mentalement le rôle de chaque intervenant d'après la liste des participants et la transcription. Utilise ensuite ce tableau pour désigner les personnes dans le corps du texte :
+
+| Catégorie | Désignation dans le texte |
+|---|---|
+| mandataire_ad_hoc | "Le Mandataire ad hoc", "le cabinet" |
+| conciliateur | "Le Conciliateur" |
+| administrateur_judiciaire | "L'Administrateur judiciaire" |
+| mandataire_judiciaire | "Le Mandataire judiciaire" |
+| debiteur | "Le dirigeant", "la société", ou "[Nom]" selon contexte |
+| conseil_debiteur | "Le conseil du débiteur", "Maître [Nom]" |
+| partenaire_bancaire | nom de l'établissement ou "la banque" |
+| conseil_partenaire | "Le conseil des partenaires bancaires" |
+| auditeur_expert | "L'expert-comptable", "le cabinet [Nom]" |
+
+RÈGLES D'ATTRIBUTION :
+- Les décisions, orientations et demandes émanent du Mandataire ad hoc (ou Administrateur, Conciliateur selon procédure) — jamais du conseil ou du dirigeant sauf mention explicite.
+- Les informations sur la situation de l'entreprise sont apportées par le dirigeant ou l'expert-comptable.
+- Les positions et propositions de remboursement sont formulées par le cabinet mandataire, négociées avec les partenaires.
+- En cas de doute sur l'auteur d'un propos, attribue à la personne dont le rôle est cohérent avec le contenu (ex. : une décision de procédure → Mandataire ad hoc ; un chiffre financier → expert-comptable ou dirigeant).
+- N'invente jamais de propos : si tu ne sais pas qui a dit quoi, utilise "Il a été rappelé que..." ou "Il a été acté que...".`
 
 // ─── Outil Claude ─────────────────────────────────────────────────────────────
 
@@ -282,9 +305,11 @@ export function buildPrompt(
   const dateBlock = dateStr ? `\nDate de la réunion : ${dateStr}` : ''
   const participantsBlock = participants?.length
     ? `\nParticipants (liste Teams — utilise l'email pour catégoriser et le recopier dans le champ email) :\n${participants.map((p) => {
+        const isCabinet = p.email?.toLowerCase().includes('@bl-aj.fr')
         const parts = [p.name]
         if (p.email) parts.push(`<${p.email}>`)
         if (p.company) parts.push(`— ${p.company}`)
+        if (isCabinet) parts.push('[CABINET BL & ASSOCIÉS — mandataire]')
         return `- ${parts.join(' ')}`
       }).join('\n')}`
     : ''
