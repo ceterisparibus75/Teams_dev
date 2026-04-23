@@ -38,7 +38,7 @@ interface MeetingRef {
   subject: string
   startDateTime: string
   hasTranscription: boolean
-  minutes: Array<{ id: string; status: string }>
+  minutes: { id: string; status: string } | null
 }
 
 interface DossierData {
@@ -243,7 +243,7 @@ export default function DossierDetailPage() {
           <p className="text-sm text-gray-500">Aucune réunion associée à ce dossier.</p>
         ) : (
           dossier.meetings.map((m) => {
-            const latestMinutes = m.minutes[0]
+            const latestMinutes = m.minutes
             const ms = latestMinutes ? MINUTES_STATUS[latestMinutes.status] : null
             return (
               <div

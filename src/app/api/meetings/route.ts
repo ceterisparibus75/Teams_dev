@@ -28,11 +28,16 @@ export async function GET(req: NextRequest) {
   try {
     const graphMeetings = await getRecentMeetings(session.user.id)
 
-    // Charge tous les dossiers actifs pour l'auto-association
-    const dossiers = await prisma.dossier.findMany({
-      where: { statut: { not: 'ARCHIVE' } },
-      select: { id: true, denomination: true },
-    })
+    // Charge tous les dossiers actifs pour l'auto-association (dégradé si indisponible)
+    let dossiers: Array<{ id: string; denomination: string }> = []
+    try {
+      dossiers = await prisma.dossier.findMany({
+        where: { statut: { not: 'ARCHIVE' } },
+        select: { id: true, denomination: true },
+      })
+    } catch {
+      // La table dossier n'est pas encore disponible — on continue sans auto-association
+    }
 
     for (const gm of graphMeetings) {
       const existing = await prisma.meeting.findUnique({ where: { id: gm.id } })
