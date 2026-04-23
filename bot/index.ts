@@ -25,6 +25,16 @@ app.use(express.json())
 
 export const prisma = new PrismaClient()
 
+// ─── Stats partagées ──────────────────────────────────────────────────────────
+
+export const botStats = {
+  startedAt: new Date().toISOString(),
+  lastTickAt: null as string | null,
+  tickCount: 0,
+  errorCount: 0,
+  meetingsGenerated: 0,
+}
+
 // ─── Génération du compte rendu ───────────────────────────────────────────────
 
 export async function triggerGeneration(
@@ -47,6 +57,7 @@ export async function triggerGeneration(
         data: { hasTranscription: !!transcript, processedAt: new Date() },
       })
       console.log(`[bot] Compte rendu généré pour ${meetingDbId}`)
+      botStats.meetingsGenerated++
       return true
     }
 
@@ -61,8 +72,38 @@ export async function triggerGeneration(
 // ─── Health check ─────────────────────────────────────────────────────────────
 
 app.get('/health', (_req: Request, res: Response) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() })
+  const uptimeSeconds = Math.floor((Date.now() - new Date(botStats.startedAt).getTime()) / 1000)
+  res.json({
+    status: 'ok',
+    uptime: uptimeSeconds,
+    startedAt: botStats.startedAt,
+    lastTickAt: botStats.lastTickAt,
+    tickCount: botStats.tickCount,
+    errorCount: botStats.errorCount,
+    meetingsGenerated: botStats.meetingsGenerated,
+  })
 })
+
+// ─── Gestionnaires d'erreurs non interceptées ────────────────────────────────
+
+process.on('uncaughtException', (err) => {
+  console.error('[bot] ERREUR NON INTERCEPTÉE:', err)
+  botStats.errorCount++
+})
+
+process.on('unhandledRejection', (reason) => {
+  console.error('[bot] PROMESSE REJETÉE NON GÉRÉE:', reason)
+  botStats.errorCount++
+})
+
+// ─── Heartbeat toutes les 5 minutes ─────────────────────────────────────────
+
+setInterval(() => {
+  const uptimeSeconds = Math.floor((Date.now() - new Date(botStats.startedAt).getTime()) / 1000)
+  console.log(
+    `[bot] ♥ heartbeat — uptime: ${uptimeSeconds}s | ticks: ${botStats.tickCount} | erreurs: ${botStats.errorCount} | réunions: ${botStats.meetingsGenerated}`
+  )
+}, 5 * 60 * 1000)
 
 // ─── Démarrage ────────────────────────────────────────────────────────────────
 

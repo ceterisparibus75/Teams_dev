@@ -14,7 +14,7 @@
 import { Client } from '@microsoft/microsoft-graph-client'
 import { ConfidentialClientApplication } from '@azure/msal-node'
 import type { MeetingPlatform } from '@prisma/client'
-import { prisma, triggerGeneration } from './index'
+import { prisma, triggerGeneration, botStats } from './index'
 import { joinMeeting } from './browser-bot'
 
 const processingMeetings = new Set<string>()
@@ -400,7 +400,14 @@ export function startWatcher(): void {
   // Recursive setTimeout instead of setInterval to avoid concurrent ticks
   // if a tick takes longer than 60 seconds (slow Graph API, many users, etc.)
   async function scheduleTick() {
-    await tick().catch((err) => console.error('[bot] Erreur tick watcher:', err))
+    try {
+      await tick()
+      botStats.lastTickAt = new Date().toISOString()
+      botStats.tickCount++
+    } catch (err) {
+      console.error('[bot] Erreur tick watcher:', err)
+      botStats.errorCount++
+    }
     setTimeout(scheduleTick, 60_000)
   }
 
