@@ -6,6 +6,7 @@ import { ArrowLeft, Link2, Unlink, FileText, ExternalLink, Loader2 } from 'lucid
 import Link from 'next/link'
 import { Badge } from '@/components/ui'
 import { formatDateTime } from '@/lib/utils'
+import type { AttendanceWarning } from '@/lib/attendance-warning'
 import type { TypeProcedure, StatutDossier } from '@prisma/client'
 
 const PROCEDURE_LABELS: Record<string, string> = {
@@ -65,6 +66,12 @@ interface FreeMeeting {
   id: string
   subject: string
   startDateTime: string
+}
+
+interface GenerateResponse {
+  id: string
+  generating?: boolean
+  attendanceWarning?: AttendanceWarning | null
 }
 
 export default function DossierDetailPage() {
@@ -146,7 +153,12 @@ export default function DossierDetailPage() {
         })
         return
       }
-      const data = await res.json()
+      const data = (await res.json()) as GenerateResponse
+      if (data.attendanceWarning) {
+        toast.warning(data.attendanceWarning.message, {
+          description: data.attendanceWarning.detail ?? undefined,
+        })
+      }
       if (data.generating) {
         toast.success('Génération lancée — Claude rédige en arrière-plan')
       } else {

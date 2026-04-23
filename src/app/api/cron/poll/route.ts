@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getAttendanceRecords, getMeetingsEndedInLastHours, getTranscription } from '@/lib/microsoft-graph'
+import { getAttendanceWarning } from '@/lib/attendance-warning'
+import { getAttendanceLookup, getMeetingsEndedInLastHours, getTranscription } from '@/lib/microsoft-graph'
 import { generateMinutesContent } from '@/lib/azure-openai'
 
 // Cooldown in-memory : protège contre les replay attacks (token intercepté)
@@ -89,7 +90,9 @@ export async function GET(req: NextRequest) {
       const transcription = await getTranscription(user.id, gm.joinUrl, {
         subject: gm.subject,
       })
-      const attendanceRecords = await getAttendanceRecords(user.id, gm.joinUrl)
+      const attendanceLookup = await getAttendanceLookup(user.id, gm.joinUrl)
+      const attendanceWarning = getAttendanceWarning(attendanceLookup)
+      if (attendanceWarning) console.warn('[cron/poll] Attendance warning:', attendanceWarning)
       const content = await generateMinutesContent(
         gm.subject,
         transcription,
@@ -97,7 +100,7 @@ export async function GET(req: NextRequest) {
           name: a.emailAddress.name,
           email: a.emailAddress.address,
         })),
-        { userId: user.id, meetingDate: new Date(gm.startDateTime), attendanceRecords }
+        { userId: user.id, meetingDate: new Date(gm.startDateTime), attendanceLookup }
       )
 
       await prisma.meetingMinutes.create({

@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { useRouter } from 'next/navigation'
 import { MeetingCard } from '@/components/meetings/MeetingCard'
+import type { AttendanceWarning } from '@/lib/attendance-warning'
 import type { MeetingPlatform, BotStatus } from '@prisma/client'
 
 interface MeetingData {
@@ -16,6 +17,12 @@ interface MeetingData {
   botScheduledAt: string | null
   participants: Array<{ name: string; email: string }>
   minutes?: { id: string; status: string; generating: boolean } | null
+}
+
+interface GenerateResponse {
+  id: string
+  generating?: boolean
+  attendanceWarning?: AttendanceWarning | null
 }
 
 export default function ReunionsPage() {
@@ -70,7 +77,12 @@ export default function ReunionsPage() {
         })
         return
       }
-      const data = await res.json()
+      const data = (await res.json()) as GenerateResponse
+      if (data.attendanceWarning) {
+        toast.warning(data.attendanceWarning.message, {
+          description: data.attendanceWarning.detail ?? undefined,
+        })
+      }
       if (data.generating) {
         toast.success('Génération lancée — Claude rédige en arrière-plan')
       } else {

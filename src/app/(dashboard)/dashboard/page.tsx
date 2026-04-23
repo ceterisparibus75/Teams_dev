@@ -4,6 +4,7 @@ import { toast } from 'sonner'
 import { useRouter } from 'next/navigation'
 import { Loader2 } from 'lucide-react'
 import { MeetingCard } from '@/components/meetings/MeetingCard'
+import type { AttendanceWarning } from '@/lib/attendance-warning'
 import type { MeetingPlatform, BotStatus } from '@prisma/client'
 
 interface MeetingData {
@@ -16,6 +17,12 @@ interface MeetingData {
   botStatus: BotStatus | null
   participants: Array<{ name: string; email: string }>
   minutes?: { id: string; status: string; generating: boolean } | null
+}
+
+interface GenerateResponse {
+  id: string
+  generating?: boolean
+  attendanceWarning?: AttendanceWarning | null
 }
 
 export default function DashboardPage() {
@@ -90,7 +97,12 @@ export default function DashboardPage() {
     try {
       const res = await fetch(`/api/generate/${meetingId}`, { method: 'POST' })
       if (!res.ok) { toast.error('Erreur lors de la génération'); return }
-      const data = await res.json()
+      const data = (await res.json()) as GenerateResponse
+      if (data.attendanceWarning) {
+        toast.warning(data.attendanceWarning.message, {
+          description: data.attendanceWarning.detail ?? undefined,
+        })
+      }
       if (data.generating) {
         toast.success('Génération lancée — Claude travaille en arrière-plan')
         router.push(`/comptes-rendus/${data.id}`)

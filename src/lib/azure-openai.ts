@@ -2,7 +2,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import { createHash } from 'crypto'
 import { prisma } from '@/lib/prisma'
 import { PvContentSchema, type PvContent } from '@/schemas/pv-content.schema'
-import type { MeetingAttendanceRecord, MinutesContent, PVSection } from '@/types'
+import type { MeetingAttendanceLookup, MeetingAttendanceRecord, MinutesContent, PVSection } from '@/types'
 
 // ─── Constantes prompt ────────────────────────────────────────────────────────
 
@@ -732,12 +732,13 @@ export async function generateMinutesContent(
     modelName?: string
     meetingDate?: Date
     attendanceRecords?: MeetingAttendanceRecord[]
+    attendanceLookup?: MeetingAttendanceLookup
   }
 ): Promise<MinutesContent> {
   const client = getClient()
   const model = options?.modelName ?? 'claude-opus-4-7'
   const systemPrompt = options?.promptText ?? SYSTEM_PROMPT
-  const attendanceRecords = options?.attendanceRecords ?? []
+  const attendanceRecords = options?.attendanceLookup?.records ?? options?.attendanceRecords ?? []
   const userMessage = buildPrompt(subject, transcription, participants, options?.meetingDate, attendanceRecords)
   const startMs = Date.now()
 

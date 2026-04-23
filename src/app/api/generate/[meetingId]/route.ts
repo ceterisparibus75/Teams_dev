@@ -2,8 +2,9 @@ import { NextRequest, NextResponse, after } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
-import { getAttendanceRecords, getTranscription } from '@/lib/microsoft-graph'
+import { getAttendanceLookup, getTranscription } from '@/lib/microsoft-graph'
 import { generateMinutesContent, createSkeletonContent } from '@/lib/azure-openai'
+import { getAttendanceWarning } from '@/lib/attendance-warning'
 import type { Prisma } from '@prisma/client'
 
 // Plan Pro : 300 s max. Le handler répond en < 1 s (squelette),
@@ -67,6 +68,8 @@ export async function POST(
   const participants = meeting.participants
   const startDateTime = meeting.startDateTime
   const joinUrl = meeting.joinUrl
+  const attendanceLookup = await getAttendanceLookup(userId, joinUrl)
+  const attendanceWarning = getAttendanceWarning(attendanceLookup)
 
   // Tout en arrière-plan : récupération transcription + génération Claude
   after(async () => {
@@ -94,12 +97,11 @@ export async function POST(
       }
 
       console.log(`[generate/after] Transcription trouvée (${transcription.length} chars) — appel Claude`)
-      const attendanceRecords = await getAttendanceRecords(userId, joinUrl)
       const content = await generateMinutesContent(
         meetingSubject,
         transcription,
         participants,
-        { userId, minutesId, meetingDate: startDateTime ?? undefined, attendanceRecords }
+        { userId, minutesId, meetingDate: startDateTime ?? undefined, attendanceLookup }
       )
       await prisma.meetingMinutes.update({
         where: { id: minutesId },
@@ -127,5 +129,5 @@ export async function POST(
     }
   })
 
-  return NextResponse.json({ ...savedMinutes, content: skeletonWithFlag, generating: true })
+  return NextResponse.json({ ...savedMinutes, content: skeletonWithFlag, generating: true, attendanceWarning })
 }
