@@ -572,7 +572,9 @@ export async function generateDocx(params: {
 
   // ── Ordre du jour ─────────────────────────────────────────────────────────
   const pvSections = content.sections?.length ? content.sections : null
-  const agendaItems = pvSections ? pvSections.map((s) => s.titre) : sections.map((s) => s.label)
+  // Supprime le préfixe numérique éventuel que Claude inclut dans le titre (ex: "1- Titre" → "Titre")
+  const stripNumPrefix = (s: string) => s.replace(/^\d+[-.\s]+/, '').trim()
+  const agendaItems = pvSections ? pvSections.map((s) => stripNumPrefix(s.titre)) : sections.map((s) => s.label)
   const odjBlock: Paragraph[] = [
     sectionLabel('Ordre du jour', cfg),
     ...agendaItems.map((item, i) => numberedItem(i + 1, item, cfg)),
@@ -584,7 +586,7 @@ export async function generateDocx(params: {
 
   if (pvSections) {
     for (const pvSection of pvSections) {
-      contentBlocks.push(pvSectionHeading(pvSection.numero, pvSection.titre, cfg))
+      contentBlocks.push(pvSectionHeading(pvSection.numero, stripNumPrefix(pvSection.titre), cfg))
       contentBlocks.push(...renderPVContent(pvSection.contenu, cfg))
     }
 
