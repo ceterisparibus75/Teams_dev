@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { toast } from 'sonner'
-import { ArrowLeft, Link2, Unlink, FileText, ExternalLink } from 'lucide-react'
+import { ArrowLeft, Link2, Unlink, FileText, ExternalLink, Loader2 } from 'lucide-react'
 import Link from 'next/link'
 import { Badge } from '@/components/ui'
 import { formatDateTime } from '@/lib/utils'
@@ -67,6 +67,7 @@ export default function DossierDetailPage() {
   const [updatingStatut, setUpdatingStatut] = useState(false)
   const [linkingId, setLinkingId] = useState<string | null>(null)
   const [unlinkingId, setUnlinkingId] = useState<string | null>(null)
+  const [generatingId, setGeneratingId] = useState<string | null>(null)
 
   async function load() {
     const res = await fetch(`/api/dossiers/${id}`)
@@ -118,6 +119,29 @@ export default function DossierDetailPage() {
       toast.error('Erreur lors de l\'association')
     }
     setLinkingId(null)
+  }
+
+  async function handleGenerate(meetingId: string) {
+    setGeneratingId(meetingId)
+    try {
+      const res = await fetch(`/api/generate/${meetingId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ style: 'detailed' }),
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({})) as { error?: string; code?: string; detail?: string }
+        toast.error(err.error ?? 'Erreur lors de la génération', {
+          description: [err.code, err.detail].filter(Boolean).join(' — ') || undefined,
+        })
+        return
+      }
+      const data = await res.json()
+      toast.success('Compte rendu généré')
+      router.push(`/comptes-rendus/${data.id}`)
+    } finally {
+      setGeneratingId(null)
+    }
   }
 
   async function handleUnlink(meetingId: string) {
@@ -256,7 +280,7 @@ export default function DossierDetailPage() {
                 </div>
                 <div className="flex items-center gap-3">
                   {ms && <Badge variant={ms.variant}>{ms.label}</Badge>}
-                  {latestMinutes && (
+                  {latestMinutes ? (
                     <Link
                       href={`/comptes-rendus/${latestMinutes.id}`}
                       className="text-gray-400 hover:text-blue-600 transition-colors"
@@ -264,6 +288,19 @@ export default function DossierDetailPage() {
                     >
                       <FileText size={16} />
                     </Link>
+                  ) : (
+                    <button
+                      disabled={generatingId === m.id}
+                      onClick={() => handleGenerate(m.id)}
+                      className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 font-medium disabled:opacity-50"
+                      title="Créer le compte rendu"
+                    >
+                      {generatingId === m.id ? (
+                        <><Loader2 size={12} className="animate-spin" /> Génération…</>
+                      ) : (
+                        'Créer le CR'
+                      )}
+                    </button>
                   )}
                   <Link
                     href={`/reunions`}

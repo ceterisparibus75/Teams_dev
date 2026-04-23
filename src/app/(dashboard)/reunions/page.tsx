@@ -63,7 +63,13 @@ export default function ReunionsPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ style: 'detailed' }),
       })
-      if (!res.ok) { toast.error('Erreur lors de la génération'); return }
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({})) as { error?: string; code?: string; detail?: string }
+        toast.error(err.error ?? 'Erreur lors de la génération', {
+          description: [err.code, err.detail].filter(Boolean).join(' — ') || undefined,
+        })
+        return
+      }
       const data = await res.json()
       toast.success('Compte rendu généré')
       router.push(`/comptes-rendus/${data.id}`)
