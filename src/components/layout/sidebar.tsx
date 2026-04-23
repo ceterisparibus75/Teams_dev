@@ -1,7 +1,7 @@
 'use client'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { LayoutDashboard, Video, FileText, Settings, LogOut, FolderOpen, Bot } from 'lucide-react'
+import { Activity, LayoutDashboard, Video, FileText, Settings, LogOut, FolderOpen, Bot } from 'lucide-react'
 import { signOut } from 'next-auth/react'
 import { cn } from '@/lib/utils'
 
@@ -10,6 +10,7 @@ const nav = [
   { href: '/dossiers',       label: 'Dossiers',         icon: FolderOpen },
   { href: '/reunions',       label: 'Réunions Teams',   icon: Video },
   { href: '/comptes-rendus', label: 'Comptes rendus',   icon: FileText },
+  { href: '/operations',     label: 'Suivi traitements', icon: Activity },
   { href: '/parametres',     label: 'Templates',        icon: Settings },
   { href: '/prompts',        label: 'Prompts IA',       icon: Bot },
 ]
