@@ -2,7 +2,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { toast } from 'sonner'
-import { Download, Send, RefreshCw, CheckCircle, ChevronDown, ChevronUp, Loader2 } from 'lucide-react'
+import { Download, Send, RefreshCw, CheckCircle, ChevronDown, ChevronUp, Loader2, Plus, Trash2 } from 'lucide-react'
 import { Button, Badge } from '@/components/ui'
 import { SectionEditor } from '@/components/minutes/SectionEditor'
 import { SendModal } from '@/components/minutes/SendModal'
@@ -29,6 +29,23 @@ const statusConfig: Record<string, { label: string; variant: 'default' | 'warnin
   VALIDATED: { label: 'Validé',    variant: 'info'    },
   SENT:      { label: 'Envoyé',    variant: 'success' },
 }
+
+const TYPE_PROCEDURE_OPTIONS = ['Mandat ad hoc', 'Conciliation', 'Redressement judiciaire', 'Sauvegarde'] as const
+const PRESENCE_OPTIONS = ['Visioconférence', 'Présentiel', 'Téléphonique', 'Absent'] as const
+const CATEGORIE_OPTIONS = [
+  'debiteur',
+  'conseil_debiteur',
+  'partenaire_bancaire',
+  'conseil_partenaire',
+  'auditeur_expert',
+  'mandataire_ad_hoc',
+  'conciliateur',
+  'administrateur_judiciaire',
+  'mandataire_judiciaire',
+  'actionnaire',
+  'repreneur',
+  'autre',
+] as const
 
 interface MinutesData {
   id: string
@@ -58,6 +75,10 @@ function splitEditableLines(value: string): string[] {
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter(Boolean)
+}
+
+function joinEditableLines(values?: string[]): string {
+  return values?.join('\n') ?? ''
 }
 
 export default function MinutesDetailPage() {
@@ -306,16 +327,20 @@ export default function MinutesDetailPage() {
   const ACTION_SECTION: TemplateSection = { id: 'actions', label: 'Actions à suivre', type: 'table', aiGenerated: true }
   const NOTES_SECTION: TemplateSection = { id: 'notes', label: 'Notes complémentaires', type: 'text', aiGenerated: false }
 
-  function updatePointsVigilance(value: string) {
+  function updatePvContent(updater: (pv: PvContent) => PvContent) {
     if (!content || !pvContent) return
     const nextContent: MinutesContent = {
       ...content,
-      _pv: {
-        ...pvContent,
-        points_vigilance: splitEditableLines(value),
-      },
+      _pv: updater(pvContent),
     }
     updateContent(nextContent)
+  }
+
+  function updatePointsVigilance(value: string) {
+    updatePvContent((pv) => ({
+      ...pv,
+      points_vigilance: splitEditableLines(value),
+    }))
   }
 
   return (
@@ -466,6 +491,257 @@ export default function MinutesDetailPage() {
       <p className="text-sm text-gray-500">
         Participants : {data.meeting.participants.map((p) => p.name).join(', ')}
       </p>
+
+      {pvContent && (
+        <>
+          <div className="bg-white border border-gray-200 rounded-xl p-6 space-y-4">
+            <h2 className="text-lg font-semibold text-gray-900">Informations du PV</h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-gray-500" htmlFor="pv-affaire">Affaire</label>
+                <input
+                  id="pv-affaire"
+                  value={pvContent.metadata.affaire}
+                  onChange={(e) => updatePvContent((pv) => ({
+                    ...pv,
+                    metadata: { ...pv.metadata, affaire: e.target.value },
+                  }))}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-gray-500" htmlFor="pv-procedure">Type de procédure</label>
+                <select
+                  id="pv-procedure"
+                  value={pvContent.metadata.type_procedure}
+                  onChange={(e) => updatePvContent((pv) => ({
+                    ...pv,
+                    metadata: {
+                      ...pv.metadata,
+                      type_procedure: e.target.value as PvContent['metadata']['type_procedure'],
+                    },
+                  }))}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                >
+                  {TYPE_PROCEDURE_OPTIONS.map((option) => (
+                    <option key={option} value={option}>{option}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-gray-500" htmlFor="pv-date">Date figurant au PV</label>
+                <input
+                  id="pv-date"
+                  value={pvContent.metadata.date_reunion}
+                  onChange={(e) => updatePvContent((pv) => ({
+                    ...pv,
+                    metadata: { ...pv.metadata, date_reunion: e.target.value },
+                  }))}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-gray-500" htmlFor="pv-objet">Objet</label>
+                <input
+                  id="pv-objet"
+                  value={pvContent.metadata.objet ?? ''}
+                  onChange={(e) => updatePvContent((pv) => ({
+                    ...pv,
+                    metadata: { ...pv.metadata, objet: e.target.value },
+                  }))}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-gray-500" htmlFor="pv-modalites">Modalités</label>
+                <input
+                  id="pv-modalites"
+                  value={pvContent.modalites}
+                  onChange={(e) => updatePvContent((pv) => ({ ...pv, modalites: e.target.value }))}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-gray-500" htmlFor="pv-ville">Ville de signature</label>
+                <input
+                  id="pv-ville"
+                  value={pvContent.metadata.ville_signature}
+                  onChange={(e) => updatePvContent((pv) => ({
+                    ...pv,
+                    metadata: { ...pv.metadata, ville_signature: e.target.value },
+                  }))}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                />
+              </div>
+              <div className="space-y-1 md:col-span-2">
+                <label className="text-xs font-medium text-gray-500" htmlFor="pv-signataire">Signataire</label>
+                <input
+                  id="pv-signataire"
+                  value={pvContent.metadata.signataire}
+                  onChange={(e) => updatePvContent((pv) => ({
+                    ...pv,
+                    metadata: { ...pv.metadata, signataire: e.target.value },
+                  }))}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white border border-gray-200 rounded-xl p-6 space-y-4">
+            <h2 className="text-lg font-semibold text-gray-900">Documents et points en suspens</h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-gray-500" htmlFor="pv-documents">
+                  Documents communiqués en amont
+                </label>
+                <textarea
+                  id="pv-documents"
+                  value={joinEditableLines(pvContent.documents_amont)}
+                  onChange={(e) => updatePvContent((pv) => ({
+                    ...pv,
+                    documents_amont: splitEditableLines(e.target.value),
+                  }))}
+                  rows={6}
+                  className="w-full border border-gray-200 rounded-lg p-3 text-sm text-gray-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 resize-y"
+                  placeholder="Un document par ligne..."
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-gray-500" htmlFor="pv-desaccord">
+                  Points de désaccord et points en suspens
+                </label>
+                <textarea
+                  id="pv-desaccord"
+                  value={joinEditableLines(pvContent.points_desaccord)}
+                  onChange={(e) => updatePvContent((pv) => ({
+                    ...pv,
+                    points_desaccord: splitEditableLines(e.target.value),
+                  }))}
+                  rows={6}
+                  className="w-full border border-gray-200 rounded-lg p-3 text-sm text-gray-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 resize-y"
+                  placeholder="Un point par ligne..."
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white border border-gray-200 rounded-xl p-6 space-y-4">
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="text-lg font-semibold text-gray-900">Participants du PV</h2>
+              <button
+                type="button"
+                onClick={() => updatePvContent((pv) => ({
+                  ...pv,
+                  participants: [
+                    ...pv.participants,
+                    {
+                      civilite_nom: '',
+                      societe_qualite: '',
+                      email: '',
+                      presence: 'Visioconférence',
+                      categorie: 'autre',
+                    },
+                  ],
+                }))}
+                className="flex items-center gap-1.5 text-sm text-blue-600 hover:underline"
+              >
+                <Plus size={14} /> Ajouter
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              {pvContent.participants.map((participant, index) => (
+                <div key={index} className="border border-gray-100 rounded-lg p-3 space-y-3">
+                  <div className="grid grid-cols-1 md:grid-cols-[1fr_1fr_32px] gap-2 items-start">
+                    <input
+                      value={participant.civilite_nom}
+                      onChange={(e) => updatePvContent((pv) => ({
+                        ...pv,
+                        participants: pv.participants.map((item, itemIndex) =>
+                          itemIndex === index ? { ...item, civilite_nom: e.target.value } : item
+                        ),
+                      }))}
+                      className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                      placeholder="Nom et prénom"
+                    />
+                    <input
+                      value={participant.email ?? ''}
+                      onChange={(e) => updatePvContent((pv) => ({
+                        ...pv,
+                        participants: pv.participants.map((item, itemIndex) =>
+                          itemIndex === index ? { ...item, email: e.target.value } : item
+                        ),
+                      }))}
+                      className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                      placeholder="Email"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => updatePvContent((pv) => ({
+                        ...pv,
+                        participants: pv.participants.filter((_, itemIndex) => itemIndex !== index),
+                      }))}
+                      className="h-10 text-gray-300 hover:text-red-500 flex items-center justify-center"
+                      aria-label="Supprimer le participant"
+                    >
+                      <Trash2 size={15} />
+                    </button>
+                  </div>
+                  <input
+                    value={participant.societe_qualite}
+                    onChange={(e) => updatePvContent((pv) => ({
+                      ...pv,
+                      participants: pv.participants.map((item, itemIndex) =>
+                        itemIndex === index ? { ...item, societe_qualite: e.target.value } : item
+                      ),
+                    }))}
+                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                    placeholder="Société / qualité"
+                  />
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                    <select
+                      value={participant.presence}
+                      onChange={(e) => updatePvContent((pv) => ({
+                        ...pv,
+                        participants: pv.participants.map((item, itemIndex) =>
+                          itemIndex === index
+                            ? { ...item, presence: e.target.value as PvContent['participants'][number]['presence'] }
+                            : item
+                        ),
+                      }))}
+                      className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                    >
+                      {PRESENCE_OPTIONS.map((option) => (
+                        <option key={option} value={option}>{option}</option>
+                      ))}
+                    </select>
+                    <select
+                      value={participant.categorie}
+                      onChange={(e) => updatePvContent((pv) => ({
+                        ...pv,
+                        participants: pv.participants.map((item, itemIndex) =>
+                          itemIndex === index
+                            ? { ...item, categorie: e.target.value as PvContent['participants'][number]['categorie'] }
+                            : item
+                        ),
+                      }))}
+                      className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                    >
+                      {CATEGORIE_OPTIONS.map((option) => (
+                        <option key={option} value={option}>{option}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              ))}
+              {pvContent.participants.length === 0 && (
+                <p className="text-sm text-gray-400">Aucun participant structuré dans le PV.</p>
+              )}
+            </div>
+          </div>
+        </>
+      )}
 
       {hasPVSections ? (
         <>
