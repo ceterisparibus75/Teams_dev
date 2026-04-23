@@ -71,11 +71,11 @@ const DEFAULT_TEMPLATE: TemplateConfig = {
   policeTitres: 'Utsaah',
   taillePoliceTitre1: 14,
   taillePoliceTitre2: 12,
-  couleurTitres: '70989C',
-  couleurCorps: '000000',
-  couleurEnteteCabinet: '70989C',
-  couleurEnteteTableau: 'E8F0F1',
-  couleurBordureTableau: 'D0E4E5',
+  couleurTitres: '6AAFAB',
+  couleurCorps: '2C2C2C',
+  couleurEnteteCabinet: '6AAFAB',
+  couleurEnteteTableau: 'E5F5F4',
+  couleurBordureTableau: 'AFDAD7',
   margeHautCm: 2.5,
   margeBasCm: 2.5,
   margeGaucheCm: 2.5,
@@ -482,9 +482,13 @@ export async function generateDocx(params: {
   const { subject, date, participants, content, sections } = params
   const cfg: TemplateConfig = { ...DEFAULT_TEMPLATE, ...(params.template ?? {}) }
 
-  // Migration transparente : Cambria était l'ancienne valeur par défaut — forcer Utsaah
+  // Migration transparente des anciennes valeurs par défaut stockées en BDD
   if (cfg.policeCorps === 'Cambria') cfg.policeCorps = 'Utsaah'
   if (cfg.policeTitres === 'Cambria') cfg.policeTitres = 'Utsaah'
+  if (cfg.couleurTitres === '1F3864') cfg.couleurTitres = '6AAFAB'
+  if (cfg.couleurEnteteCabinet === '1F3864') cfg.couleurEnteteCabinet = '6AAFAB'
+  if (cfg.couleurEnteteTableau === 'D9E2F3') cfg.couleurEnteteTableau = 'E5F5F4'
+  if (cfg.couleurBordureTableau === 'BFBFBF') cfg.couleurBordureTableau = 'AFDAD7'
 
   // Logo depuis base64 du template
   const logoBuffer: Buffer | null = cfg.logoBase64
