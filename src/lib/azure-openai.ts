@@ -363,40 +363,52 @@ export async function generateMinutesContent(
     model
   )
 
-  // stream().finalMessage() est requis par l'API Anthropic pour les appels
-  // qui pourraient dépasser 10 minutes.
-  // max_tokens=8000 est largement suffisant pour un PV détaillé (4-5 pages ≈ 3500 tokens).
+  // stream().finalMessage() requis pour les appels potentiellement longs.
+  // max_tokens=16000 : suffisant pour un PV très détaillé, évite stop_reason=max_tokens.
   const callClaude = () =>
     client.messages.stream({
       model,
-      max_tokens: 8000,
+      max_tokens: 16000,
       system: systemPrompt,
       tools: [GENERER_PV_TOOL],
       tool_choice: { type: 'tool', name: 'generer_pv' },
       messages: [{ role: 'user', content: userMessage }],
     }).finalMessage()
 
-  const extractToolInput = (response: Awaited<ReturnType<typeof callClaude>>) => {
+  // Diagnostic accumulé — inclus dans le message d'erreur final pour diagnostic sans logs Vercel
+  let lastDiag = ''
+
+  const extractToolInput = (response: Awaited<ReturnType<typeof callClaude>>, attempt: number) => {
+    const blockTypes = response.content.map((b) => b.type).join(', ')
     console.log(
-      '[Claude] stop_reason=%s, content blocks: %s',
-      response.stop_reason,
-      response.content.map((b) => b.type).join(', ')
+      '[Claude] tentative=%d stop_reason=%s tokens_out=%d blocs=[%s]',
+      attempt, response.stop_reason, response.usage.output_tokens, blockTypes
     )
-    if (response.stop_reason === 'max_tokens') {
-      console.warn('[Claude] stop_reason=max_tokens — JSON probablement tronqué')
-    }
+
     const block = response.content.find((b) => b.type === 'tool_use')
     if (!block || block.type !== 'tool_use') {
-      console.warn('[Claude] Aucun bloc tool_use (stop_reason=%s) — content: %j', response.stop_reason, response.content)
+      lastDiag = `tentative ${attempt} — stop_reason=${response.stop_reason} | aucun bloc tool_use | blocs=[${blockTypes}] | tokens_out=${response.usage.output_tokens}`
+      console.warn('[Claude]', lastDiag)
       return null
     }
+
     const input = block.input as Record<string, unknown>
-    const keyCount = Object.keys(input).length
-    console.log('[Claude] tool_use reçu — %d clé(s) de premier niveau: %s', keyCount, Object.keys(input).join(', '))
-    if (keyCount < 2) {
-      console.warn('[Claude] Input vide ou incomplet (%d clé(s)), stop_reason=%s', keyCount, response.stop_reason)
+    const keys = Object.keys(input)
+    console.log('[Claude] tentative=%d — %d clé(s): %s', attempt, keys.length, keys.join(', '))
+
+    if (keys.length === 0) {
+      lastDiag = `tentative ${attempt} — stop_reason=${response.stop_reason} | tool_use présent mais input={} (JSON tronqué ?) | tokens_out=${response.usage.output_tokens}`
+      console.warn('[Claude]', lastDiag)
+      return null
     }
-    return keyCount >= 2 ? input : null
+
+    if (keys.length < 3) {
+      lastDiag = `tentative ${attempt} — stop_reason=${response.stop_reason} | input partiel (${keys.length} clé(s): ${keys.join(',')}) | tokens_out=${response.usage.output_tokens}`
+      console.warn('[Claude]', lastDiag)
+    }
+
+    // On accepte tout input non-vide (même partiel) — Zod valide ensuite
+    return input
   }
 
   try {
@@ -404,19 +416,20 @@ export async function generateMinutesContent(
     tokensInput = response.usage.input_tokens
     tokensOutput = response.usage.output_tokens
 
-    let toolInput = extractToolInput(response)
+    let toolInput = extractToolInput(response, 1)
 
-    // Retry unique si Claude retourne un input vide ou quasi-vide
     if (!toolInput) {
-      console.warn('[Claude] Input vide reçu, nouvelle tentative...')
+      console.warn('[Claude] Input vide (tentative 1), nouvelle tentative...')
       response = await callClaude()
       tokensInput += response.usage.input_tokens
       tokensOutput += response.usage.output_tokens
-      toolInput = extractToolInput(response)
+      toolInput = extractToolInput(response, 2)
     }
 
     if (!toolInput) {
-      throw new Error('Claude a retourné une réponse vide après deux tentatives — aucun champ généré')
+      throw new Error(
+        `Claude a retourné une réponse vide après 2 tentatives. Diagnostic : ${lastDiag}`
+      )
     }
 
     const validation = PvContentSchema.safeParse(toolInput)
