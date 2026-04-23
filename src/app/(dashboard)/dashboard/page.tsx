@@ -1,8 +1,9 @@
 'use client'
+import Link from 'next/link'
 import { useEffect, useState, useRef } from 'react'
 import { toast } from 'sonner'
 import { useRouter } from 'next/navigation'
-import { Loader2 } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, FileText, FolderOpen, Loader2, Video } from 'lucide-react'
 import { MeetingCard } from '@/components/meetings/MeetingCard'
 import type { AttendanceWarning } from '@/lib/attendance-warning'
 import type { MeetingPlatform, BotStatus } from '@prisma/client'
@@ -25,9 +26,19 @@ interface GenerateResponse {
   attendanceWarning?: AttendanceWarning | null
 }
 
+interface OperationsSummary {
+  detected: number
+  transcriptionFound: number
+  transcriptionMissing: number
+  generationRunning: number
+  generationFailed: number
+  ready: number
+}
+
 export default function DashboardPage() {
   const router = useRouter()
   const [meetings, setMeetings] = useState<MeetingData[]>([])
+  const [operationsSummary, setOperationsSummary] = useState<OperationsSummary | null>(null)
   const [loading, setLoading] = useState(true)
   const [generating, setGenerating] = useState<string | null>(null)
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -44,8 +55,18 @@ export default function DashboardPage() {
     }
   }
 
+  async function loadOperationsSummary() {
+    try {
+      const r = await fetch('/api/operations', { cache: 'no-store' })
+      const data = await r.json()
+      if (r.ok && data?.summary) setOperationsSummary(data.summary as OperationsSummary)
+    } catch {
+      // La page reste utilisable avec les données réunions seules.
+    }
+  }
+
   useEffect(() => {
-    loadMeetings().finally(() => setLoading(false))
+    Promise.all([loadMeetings(), loadOperationsSummary()]).finally(() => setLoading(false))
   }, [])
 
   // Polling toutes les 15 s si au moins un CR est en cours de génération
@@ -91,6 +112,43 @@ export default function DashboardPage() {
   const generatingMeetings = meetings.filter((m) => m.minutes?.generating)
   const drafts = meetings.filter((m) => m.minutes?.status === 'DRAFT' && !m.minutes?.generating)
   const withoutMinutes = meetings.filter((m) => !m.minutes)
+  const problemCount =
+    (operationsSummary?.generationFailed ?? 0) + (operationsSummary?.transcriptionMissing ?? 0)
+  const readyCount = operationsSummary?.ready ?? meetings.filter((m) => m.minutes && !m.minutes.generating).length
+  const workflowCards = [
+    {
+      title: 'Réunions à traiter',
+      value: withoutMinutes.length,
+      href: '/reunions',
+      description: 'Réunions Teams détectées sans PV.',
+      icon: Video,
+      tone: 'bg-blue-50 border-blue-200 text-blue-950',
+    },
+    {
+      title: 'PV à relire',
+      value: drafts.length,
+      href: '/comptes-rendus',
+      description: 'Brouillons générés à corriger ou valider.',
+      icon: FileText,
+      tone: 'bg-amber-50 border-amber-200 text-amber-950',
+    },
+    {
+      title: 'Problèmes',
+      value: problemCount,
+      href: '/operations',
+      description: 'Transcriptions absentes ou générations échouées.',
+      icon: AlertTriangle,
+      tone: 'bg-red-50 border-red-200 text-red-950',
+    },
+    {
+      title: 'PV prêts',
+      value: readyCount,
+      href: '/dossiers',
+      description: 'PV disponibles à classer, envoyer ou retrouver.',
+      icon: FolderOpen,
+      tone: 'bg-green-50 border-green-200 text-green-950',
+    },
+  ]
 
   async function handleGenerate(meetingId: string) {
     setGenerating(meetingId)
@@ -128,7 +186,39 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-8">
-      <h1 className="text-2xl font-bold text-gray-900">Tableau de bord</h1>
+      <div className="space-y-1">
+        <p className="text-xs font-semibold uppercase tracking-wide text-blue-600">Accueil production</p>
+        <h1 className="text-2xl font-bold text-gray-900">Que faut-il traiter maintenant ?</h1>
+        <p className="text-sm text-gray-500">
+          La page priorise les réunions à transformer en PV, les brouillons à relire et les blocages à débloquer.
+        </p>
+      </div>
+
+      <section className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+        {workflowCards.map(({ title, value, href, description, icon: Icon, tone }) => (
+          <Link
+            key={title}
+            href={href}
+            className={`rounded-2xl border p-5 transition-transform hover:-translate-y-0.5 hover:shadow-sm ${tone}`}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-sm font-medium opacity-75">{title}</p>
+                <p className="mt-2 text-4xl font-bold tabular-nums">{value}</p>
+              </div>
+              <Icon size={22} className="opacity-70" />
+            </div>
+            <p className="mt-3 text-xs opacity-75">{description}</p>
+          </Link>
+        ))}
+      </section>
+
+      {withoutMinutes.length === 0 && drafts.length === 0 && problemCount === 0 && generatingMeetings.length === 0 && (
+        <div className="rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800 flex items-center gap-2.5">
+          <CheckCircle2 size={16} className="shrink-0" />
+          <span>Aucune action urgente détectée : la file de production est à jour.</span>
+        </div>
+      )}
 
       {generatingMeetings.length > 0 && (
         <section className="space-y-3">
@@ -155,7 +245,7 @@ export default function DashboardPage() {
       {drafts.length > 0 && (
         <section className="space-y-3">
           <h2 className="text-lg font-semibold text-gray-900">
-            À relire ({drafts.length})
+            PV à relire ({drafts.length})
           </h2>
           {drafts.map((m) => (
             <MeetingCard
@@ -171,10 +261,10 @@ export default function DashboardPage() {
 
       <section className="space-y-3">
         <h2 className="text-lg font-semibold text-gray-900">
-          Réunions récentes sans compte rendu ({withoutMinutes.length})
+          Réunions à traiter ({withoutMinutes.length})
         </h2>
         {withoutMinutes.length === 0 ? (
-          <p className="text-sm text-gray-500">Toutes les réunions ont un compte rendu.</p>
+          <p className="text-sm text-gray-500">Toutes les réunions détectées ont déjà un PV.</p>
         ) : (
           withoutMinutes.map((m) => (
             <MeetingCard
