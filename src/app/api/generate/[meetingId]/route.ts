@@ -3,7 +3,7 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { getTranscription } from '@/lib/microsoft-graph'
-import { generateMinutesContent } from '@/lib/azure-openai'
+import { generateMinutesContent, createSkeletonContent } from '@/lib/azure-openai'
 
 export async function POST(
   req: NextRequest,
@@ -40,20 +40,30 @@ export async function POST(
   })
 
   let content
-  try {
-    content = await generateMinutesContent(
-      meeting.subject,
-      transcription,
-      meeting.participants,
-      { userId: session.user.id, minutesId: existingMinutes?.id }
-    )
-  } catch (genError) {
-    const msg = genError instanceof Error ? genError.message : 'Erreur inconnue'
-    console.error('[generate] Claude generation failed:', genError)
-    return NextResponse.json(
-      { error: `La génération Claude a échoué : ${msg}`, code: 'generation_error' },
-      { status: 502 }
-    )
+  if (!transcription) {
+    // Pas de transcription disponible — squelette à compléter manuellement
+    content = createSkeletonContent(meeting.subject, meeting.participants, meeting.startDateTime)
+  } else {
+    try {
+      content = await generateMinutesContent(
+        meeting.subject,
+        transcription,
+        meeting.participants,
+        { userId: session.user.id, minutesId: existingMinutes?.id }
+      )
+    } catch (genError) {
+      const msg = genError instanceof Error ? genError.message : 'Erreur inconnue'
+      console.error('[generate] Claude generation failed:', genError)
+      // Fallback sur squelette plutôt que d'échouer complètement
+      if (msg.includes('réponse vide')) {
+        content = createSkeletonContent(meeting.subject, meeting.participants, meeting.startDateTime)
+      } else {
+        return NextResponse.json(
+          { error: `La génération Claude a échoué : ${msg}`, code: 'generation_error' },
+          { status: 502 }
+        )
+      }
+    }
   }
 
   if (existingMinutes) {

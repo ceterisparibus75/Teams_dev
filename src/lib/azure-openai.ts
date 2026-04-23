@@ -224,6 +224,43 @@ export function pvContentToMinutesContent(pv: PvContent): MinutesContent {
   }
 }
 
+// ─── Squelette PV sans transcription ─────────────────────────────────────────
+
+export function createSkeletonContent(
+  subject: string,
+  participants?: Array<{ name: string }>,
+  date?: Date
+): MinutesContent {
+  const dateStr = (date ?? new Date()).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })
+  const pv: PvContent = {
+    metadata: {
+      date_reunion: dateStr,
+      affaire: subject,
+      type_procedure: 'Mandat ad hoc',
+      objet: 'Réunion',
+      ville_signature: 'PARIS',
+      signataire: '[Administrateur Judiciaire]',
+    },
+    modalites: 'Réunion par visioconférence',
+    participants: (participants ?? []).map((p) => ({
+      civilite_nom: p.name,
+      societe_qualite: '[À compléter]',
+      presence: 'Visioconférence' as const,
+      categorie: 'autre' as const,
+    })),
+    documents_amont: [],
+    resume: '[À compléter — aucune transcription Teams disponible pour cette réunion]',
+    sections: [
+      { titre: 'Points abordés', contenu: '[À compléter]' },
+    ],
+    points_desaccord: [],
+    actions: [],
+    points_vigilance: ['Compte rendu généré sans transcription Teams — contenu à remplir manuellement'],
+    precisions_a_apporter: [],
+  }
+  return pvContentToMinutesContent(pv)
+}
+
 // ─── Prompt builder (conservé pour les tests unitaires) ───────────────────────
 
 // Limite la transcription pour éviter les réponses vides ou tronquées de Claude
