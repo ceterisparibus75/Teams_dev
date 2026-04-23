@@ -6,8 +6,9 @@ import { getTranscription } from '@/lib/microsoft-graph'
 import { generateMinutesContent, createSkeletonContent } from '@/lib/azure-openai'
 import type { Prisma } from '@prisma/client'
 
-// Permet à Vercel d'attendre jusqu'à 800 s pour le after() (plan Pro requis)
-export const maxDuration = 800
+// Plan Pro : 300 s max. Le handler répond en < 1 s (squelette),
+// le reste du budget est utilisé par after() pour la transcription + Claude.
+export const maxDuration = 300
 
 export async function POST(
   _req: NextRequest,
