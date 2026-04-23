@@ -175,9 +175,9 @@ model Template {
   formatNumerotation  String   @default("Page {n} sur {total}")
 
   // Polices
-  policeCorps        String @default("Cambria")
+  policeCorps        String @default("Utsaah")
   taillePoliceCorps  Int    @default(11)
-  policeTitres       String @default("Cambria")
+  policeTitres       String @default("Utsaah")
   taillePoliceTitre1 Int    @default(14)
   taillePoliceTitre2 Int    @default(12)
 

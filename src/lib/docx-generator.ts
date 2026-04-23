@@ -498,6 +498,10 @@ export async function generateDocx(params: {
   const { subject, date, participants, content, sections } = params
   const cfg: TemplateConfig = { ...DEFAULT_TEMPLATE, ...(params.template ?? {}) }
 
+  // Migration transparente : Cambria était l'ancienne valeur par défaut — forcer Utsaah
+  if (cfg.policeCorps === 'Cambria') cfg.policeCorps = 'Utsaah'
+  if (cfg.policeTitres === 'Cambria') cfg.policeTitres = 'Utsaah'
+
   // Logo depuis base64 du template
   const logoBuffer: Buffer | null = cfg.logoBase64
     ? Buffer.from(cfg.logoBase64.replace(/^data:[^;]+;base64,/, ''), 'base64')
