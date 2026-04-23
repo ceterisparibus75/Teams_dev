@@ -319,7 +319,7 @@ export async function generateMinutesContent(
       // Essaie quand même de construire un résultat partiel
       const partial = toolUseBlock.input as Partial<PvContent>
       if (partial.resume && partial.sections?.length) {
-        const lenient = PvContentSchema.parse({
+        const lenientInput = {
           metadata: partial.metadata ?? {
             date_reunion: new Date().toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' }),
             affaire: subject,
@@ -335,10 +335,15 @@ export async function generateMinutesContent(
           actions: partial.actions ?? [],
           points_vigilance: partial.points_vigilance ?? [],
           precisions_a_apporter: partial.precisions_a_apporter ?? [],
-        })
-        return pvContentToMinutesContent(lenient)
+        }
+        const lenientValidation = PvContentSchema.safeParse(lenientInput)
+        if (lenientValidation.success) {
+          return pvContentToMinutesContent(lenientValidation.data)
+        }
+        console.error('[Claude] Lenient parse also failed:', lenientValidation.error.flatten())
+        throw new Error(`Réponse Claude invalide : ${lenientValidation.error.issues.map(i => i.message).join(', ')}`)
       }
-      throw new Error('Réponse Claude invalide et non récupérable')
+      throw new Error(`Réponse Claude incomplète : résumé ou sections manquants. Détails : ${validation.error.issues.map(i => `${i.path.join('.')}: ${i.message}`).slice(0, 5).join('; ')}`)
     }
 
     return pvContentToMinutesContent(validation.data)

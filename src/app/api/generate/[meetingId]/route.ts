@@ -33,6 +33,12 @@ export async function POST(
     subject: meeting.subject,
   })
 
+  // Mettre à jour hasTranscription AVANT la génération (indépendant du succès Claude)
+  await prisma.meeting.update({
+    where: { id: meetingId },
+    data: { hasTranscription: !!transcription, processedAt: new Date() },
+  })
+
   let content
   try {
     content = await generateMinutesContent(
@@ -66,11 +72,6 @@ export async function POST(
       content: content as unknown as import('@prisma/client').Prisma.InputJsonValue,
       status: 'DRAFT',
     },
-  })
-
-  await prisma.meeting.update({
-    where: { id: meetingId },
-    data: { hasTranscription: !!transcription, processedAt: new Date() },
   })
 
   return NextResponse.json(minutes)

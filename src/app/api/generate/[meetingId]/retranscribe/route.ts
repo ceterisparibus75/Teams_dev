@@ -122,6 +122,12 @@ export async function POST(
     )
   }
 
+  // Transcription confirmée ok : mettre à jour le flag AVANT la génération
+  await prisma.meeting.update({
+    where: { id: meetingId },
+    data: { hasTranscription: true },
+  })
+
   let content
   try {
     content = await generateMinutesContent(
@@ -142,11 +148,6 @@ export async function POST(
   await prisma.meetingMinutes.update({
     where: { meetingId },
     data: { content: content as unknown as import('@prisma/client').Prisma.InputJsonValue },
-  })
-
-  await prisma.meeting.update({
-    where: { id: meetingId },
-    data: { hasTranscription: true },
   })
 
   return NextResponse.json({ ok: true, minutesId: existingMinutes.id })

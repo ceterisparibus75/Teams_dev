@@ -25,9 +25,9 @@ export const CategoriePVSchema = z.enum([
 export const ParticipantPVSchema = z.object({
   civilite_nom: z.string().min(1),
   societe_qualite: z.string().min(1),
-  email: z.string().email().optional(),
-  presence: PresenceSchema,
-  categorie: CategoriePVSchema,
+  email: z.string().optional(),
+  presence: PresenceSchema.catch('Visioconférence'),
+  categorie: CategoriePVSchema.catch('autre'),
 })
 
 export const SectionPVSchema = z.object({
@@ -43,7 +43,7 @@ export const ActionPVSchema = z.object({
 
 export const ProchaineReunionSchema = z.object({
   date: z.string(),
-  heure: z.string(),
+  heure: z.string().optional().default(''),
   fuseau: z.string().default('heure Paris'),
 })
 
@@ -51,13 +51,13 @@ export const PvContentSchema = z.object({
   metadata: z.object({
     date_reunion: z.string().min(1),
     affaire: z.string().min(1),
-    type_procedure: TypeProcedureSchema,
+    type_procedure: TypeProcedureSchema.catch('Mandat ad hoc'),
     objet: z.string().optional(),
     ville_signature: z.string().default('PARIS'),
     signataire: z.string().min(1),
   }),
-  modalites: z.string().min(1),
-  participants: z.array(ParticipantPVSchema).min(1),
+  modalites: z.string().default('Réunion par visioconférence'),
+  participants: z.array(ParticipantPVSchema).default([]),
   documents_amont: z.array(z.string()).default([]),
   resume: z.string().min(1),
   sections: z.array(SectionPVSchema).min(1),
