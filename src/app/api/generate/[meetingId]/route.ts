@@ -3,7 +3,7 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { getTranscription } from '@/lib/microsoft-graph'
-import { generateMinutesContent, type GenerationStyle } from '@/lib/azure-openai'
+import { generateMinutesContent } from '@/lib/azure-openai'
 
 export async function POST(
   req: NextRequest,
@@ -13,8 +13,6 @@ export async function POST(
   if (!session?.user?.id) return NextResponse.json({ error: 'Non autorisé' }, { status: 401 })
 
   const { meetingId } = await params
-  const body = await req.json().catch(() => ({}))
-  const style: GenerationStyle = body.style === 'concise' ? 'concise' : 'detailed'
 
   const meeting = await prisma.meeting.findFirst({
     where: {
@@ -28,14 +26,13 @@ export async function POST(
   })
   if (!meeting) return NextResponse.json({ error: 'Réunion introuvable' }, { status: 404 })
 
-  // If a draft already exists, regenerate its content with the new style
   const existingMinutes = await prisma.meetingMinutes.findUnique({ where: { meetingId } })
 
   const defaultTemplate = await prisma.template.findFirst({ where: { isDefault: true } })
   const transcription = await getTranscription(session.user.id, meeting.joinUrl, {
     subject: meeting.subject,
   })
-  const content = await generateMinutesContent(meeting.subject, transcription, style)
+  const content = await generateMinutesContent(meeting.subject, transcription, meeting.participants)
 
   if (existingMinutes) {
     await prisma.meetingMinutes.update({

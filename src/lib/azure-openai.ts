@@ -1,5 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk'
-import type { MinutesContent } from '@/types'
+import type { MinutesContent, PVSection } from '@/types'
 
 const DEFAULT_CONTENT: MinutesContent = {
   summary: '',
@@ -7,73 +7,156 @@ const DEFAULT_CONTENT: MinutesContent = {
   notes: '',
 }
 
-export type GenerationStyle = 'detailed' | 'concise'
+export type GenerationStyle = 'detailed'
 
-export function buildPrompt(subject: string, transcription: string | null, style: GenerationStyle = 'detailed'): string {
+const DOMAINE_EXPERTISE = `Tu es un assistant juridique expert au service du cabinet SELAS BL & Associés, administrateurs judiciaires et mandataires ad hoc.
+Tu maîtrises parfaitement :
+
+PROCÉDURES AMIABLES — mandat ad hoc (art. L611-3 C.com.), conciliation (art. L611-4 à L611-15 C.com.), négociation avec créanciers bancaires et institutionnels, protocole de conciliation, homologation ou constatation par le président du tribunal, confidentialité, standstill, moratoires, abandons de créances, gels d'exigibilité.
+
+PROCÉDURES COLLECTIVES — sauvegarde, sauvegarde accélérée, redressement judiciaire (art. L631-1 et s.), clôture par extinction du passif (art. L631-16), période d'observation, plan de continuation.
+
+FINANCE D'ENTREPRISE EN DIFFICULTÉ — trésorerie disponible et prévisionnelle, BFR, EBE, EBITDA, dette financière nette, covenants bancaires, Dailly, affacturage, refinancement, augmentation de capital, cession d'actifs, business plan, free cash-flow.
+
+MANAGEMENT — continuité d'exploitation, carnet de commandes, plan de retournement, communication aux parties prenantes.`
+
+const MODELE_PV = `MODÈLE DE RÉFÉRENCE — Style exact à respecter :
+
+Exemple de section bien rédigée (extrait d'un PV réel du cabinet) :
+
+"1- Propos introductifs
+
+Le Mandataire ad hoc a rappelé le cadre de cette réunion, intervenant :
+- A la suite de la procédure de conciliation qui a pris fin le 20 avril 2025 ;
+- Dans le cadre de la procédure de mandat ad hoc ouverte le 25 avril 2025.
+
+Il a été rappelé que, malgré les nombreuses réunions tenues avec les partenaires bancaires et la construction d'une solution de traitement des dettes bancaires dans le cadre de la précédente procédure de conciliation, l'une des trois banques (CE-N) a finalement refusé la proposition formulée.
+
+La CE-N a indiqué que ce refus était motivé par :
+- L'ouverture d'une procédure de conciliation quatre mois après l'octroi d'un financement ;
+- L'exploitation de l'activité de la société en dehors du ressort de compétence territoriale ;
+- L'absence de rentabilité de la société depuis sa création."
+
+Exemple de section financière bien rédigée :
+
+"2- Présentation des travaux de Grant Thornton
+
+Grant Thornton a précisé avoir repris une méthodologie identique aux travaux précédents, basée sur l'analyse des résultats réalisés en 2025, une actualisation du business plan 2026-2027, et une projection long terme jusqu'en 2033.
+
+Sur l'exercice 2025, les performances dépassent nettement les prévisions initiales. Les volumes atteignent 227,8 milliers de tonnes, contre 223 initialement anticipés. Le taux de valeur ajoutée s'établit à 37,1 %, alors que les premières hypothèses étaient proches de 30 %.
+
+L'EBITDA atteint environ 2,6 millions d'euros en 2025. Il progresserait ensuite à 3,2 millions en 2026 puis à 3,6 millions en 2027.
+
+La trajectoire de trésorerie constitue un autre point fort :
+- A fin 2023 : 1,7 M€
+- A fin 2024 : 6,2 M€
+- A fin 2025 : 14,6 M€"
+
+Exemple de dernière section :
+
+"N- Calendrier et prochaines étapes
+
+Les prochaines étapes sont les suivantes :
+- Confirmation du montant des dettes échues dues aux partenaires bancaires ;
+- Communication par les conseils de la note juridique sur la gouvernance ;
+- Retour du comité des partenaires bancaires avant le 30 avril 2026 sur les demandes listées.
+
+La prochaine réunion est fixée le 05 mai 2026 à 14h00 (heure Paris)."`
+
+export function buildPrompt(
+  subject: string,
+  transcription: string | null,
+  participants?: Array<{ name: string }>
+): string {
+  const participantsBlock = participants?.length
+    ? `\nParticipants identifiés : ${participants.map((p) => p.name).join(', ')}`
+    : ''
+
   const transcriptionBlock = transcription
-    ? `Transcription de la réunion :\n\n${transcription}`
-    : `Note : aucune transcription disponible pour cette réunion. Remplis uniquement les champs déductibles du sujet.`
+    ? `TRANSCRIPTION DE LA RÉUNION :\n\n${transcription}`
+    : `Note : aucune transcription disponible. Remplis uniquement ce qui est déductible du sujet et des participants.`
 
-  const styleInstructions = style === 'detailed'
-    ? `Style : COMPTE RENDU DÉVELOPPÉ
+  return `${DOMAINE_EXPERTISE}
 
-Tu dois produire un compte rendu exhaustif, comme le ferait un juriste présent à la réunion.
-Structure obligatoire du champ "summary" :
+${MODELE_PV}
 
-1. **Participants et contexte** — liste les personnes présentes et leur qualité (créancier, conseil, administrateur, etc.), rappelle l'objet de la réunion.
+Ta mission est de rédiger le PROCÈS VERBAL DE RÉUNION complet pour l'affaire "${subject}".${participantsBlock}
 
-2. **Déroulé par thème** — identifie les grands sujets abordés et consacre un paragraphe développé à chacun :
-   - Pour chaque thème : expose la situation initiale, détaille les échanges et positions de chaque partie (en attribuant les propos : "M. X a indiqué que…", "La société a contesté…"), mentionne les chiffres, dates, montants, délais évoqués.
-   - Ne résume pas : retranscris fidèlement la substance des échanges.
+RÈGLES ABSOLUES DE RÉDACTION :
 
-3. **Points de désaccord ou points en suspens** — identifie ce qui n'est pas résolu.
+1. STRUCTURE : Identifie les grands thèmes abordés dans la transcription. Crée une section numérotée par thème. La DERNIÈRE section est toujours "Calendrier et prochaines étapes".
 
-4. **Conclusions et suite** — ce qui a été acté à l'issue de la réunion.
+2. ATTRIBUTION SYSTÉMATIQUE : Chaque prise de position, chaque information présentée, chaque demande formulée doit être attribuée à son auteur. Exemples de formulations :
+   - "L'Administrateur Judiciaire a confirmé que..."
+   - "Le Mandataire ad hoc a rappelé que..."
+   - "Monsieur X a indiqué que..."
+   - "La société a précisé que..."
+   - "La banque Y a indiqué qu'elle ne souhaitait pas..."
+   - "Il a été rappelé que..." (pour les faits établis)
+   - "Il a été indiqué que..." (pour les informations communiquées)
 
-Le champ "summary" doit être long (plusieurs paragraphes, potentiellement 500 à 1500 mots selon la durée de la réunion). Utilise \\n\\n pour séparer les paragraphes.`
-    : `Style : COMPTE RENDU SYNTHÉTIQUE
+3. CHIFFRES ET DATES : Cite EXACTEMENT les montants (17,2 M€ — jamais "environ 17 millions"), pourcentages (37,1 % — jamais "environ 37 %"), dates (30 avril 2026 — jamais "fin avril") et délais tels qu'ils apparaissent dans la transcription.
 
-Rédige un résumé court et factuel (5 à 8 phrases maximum) centré uniquement sur : l'objet de la réunion, les points essentiels discutés, et les conclusions/décisions. Pas de détail des échanges.`
+4. LISTES TIRETÉES : Utilise des listes avec "-" pour les énumérations de points, d'arguments, d'actions demandées. Chaque item se termine par " ;" sauf le dernier qui se termine par ".".
 
-  return `Tu es un assistant juridique expert au service du cabinet SELAS BL & Associés, administrateurs judiciaires.
-Tu maîtrises parfaitement les trois domaines suivants, qui sont les sujets habituels de ces réunions :
+5. STYLE JURIDIQUE : Français formel, constructions passives ("il a été décidé que...", "il convient de..."), verbes comme "rappeler", "indiquer", "confirmer", "préciser", "solliciter", "préconiser", "envisager".
 
-DOMAINE JURIDIQUE — le cabinet intervient principalement en mandat ad hoc et en conciliation (procédures amiables et confidentielles, articles L611-3 à L611-15 du Code de commerce). Tu maîtrises : la mission du mandataire ad hoc et du conciliateur, la négociation avec les créanciers (banques, fournisseurs, administration fiscale, organismes sociaux), la recherche d'un accord amiable, le protocole de conciliation, l'homologation ou la constatation de l'accord par le président du tribunal, la confidentialité de la procédure, les délais légaux (4 mois renouvelables en conciliation), les mesures conservatoires, les gels d'exigibilité, les abandons de créances, les moratoires.
+6. LONGUEUR : Chaque section doit être substantielle. Le contenu de chaque section doit refléter fidèlement la durée et la densité des échanges. Ne résume pas : retranscris la substance.
 
-DOMAINE FINANCIER — analyse de la situation financière d'une entreprise en difficulté : trésorerie disponible et prévisionnelle, BFR, EBE, EBITDA, dette financière nette, covenant bancaire, conditions de crédit, lignes de financement court terme (Dailly, affacturage, découvert), refinancement bancaire, plan de remboursement échelonné, valorisation d'actifs, cession d'actifs non stratégiques, apport en capital, prévisionnel d'exploitation et de trésorerie sur 12-24 mois.
-
-DOMAINE MANAGEMENT & OPÉRATIONNEL — continuité d'exploitation, pilotage de la trésorerie, carnet de commandes, situation clients/fournisseurs, contrats stratégiques, mesures de restructuration opérationnelle, plan d'action de retournement, communication aux parties prenantes.
-
-Ta mission est de générer un compte rendu de la réunion "${subject}".
-
-${styleInstructions}
-
-Règles absolues :
-- Langue française uniquement, ton professionnel et factuel
-- Utilise le vocabulaire technique exact du domaine concerné (juridique, financier, managérial)
-- Ne jamais inventer d'informations absentes de la transcription
-- Retranscrire fidèlement les montants, dates, délais, références légales et noms de personnes tels qu'ils apparaissent dans la transcription
-- Laisser les champs vides si l'information n'est pas disponible
+7. NE JAMAIS INVENTER : Si une information n'est pas dans la transcription, ne l'invente pas. Ne laisse pas de champs vides inutilement — exploite tout ce qui est dans la transcription.
 
 ${transcriptionBlock}
 
-Réponds UNIQUEMENT avec un objet JSON valide, sans markdown ni balises de code, respectant exactement ce schéma :
+Réponds UNIQUEMENT avec un objet JSON valide, sans markdown ni balises de code, respectant EXACTEMENT ce schéma :
 {
-  "summary": "Compte rendu complet selon le style demandé",
-  "actions": [
-    { "description": "Action à réaliser", "responsable": "Prénom Nom", "echeance": "YYYY-MM-DD" }
+  "resume": "Résumé factuel en 5 à 8 phrases couvrant l'objet de la réunion, les points essentiels et les conclusions.",
+  "sections": [
+    {
+      "numero": 1,
+      "titre": "Titre exact de la section",
+      "contenu": "Paragraphes du corps de la section, séparés par \\n\\n. Utilise \\n- pour les listes tiretées."
+    }
   ],
-  "notes": "Points complémentaires, observations importantes, ou chaîne vide"
+  "prochaine_reunion": "Date et heure de la prochaine réunion si mentionnée, sinon chaîne vide",
+  "actions": [
+    { "description": "Action à réaliser", "responsable": "Prénom Nom ou entité", "echeance": "YYYY-MM-DD ou texte" }
+  ],
+  "notes": ""
 }`
 }
 
 export function parseMinutesContent(raw: string): MinutesContent {
   try {
-    // Extract JSON even if Claude wraps it in markdown
     const jsonMatch = raw.match(/\{[\s\S]*\}/)
     const parsed = JSON.parse(jsonMatch ? jsonMatch[0] : raw)
+
+    const sections: PVSection[] | undefined = Array.isArray(parsed.sections)
+      ? parsed.sections.filter(
+          (s: unknown): s is PVSection =>
+            typeof s === 'object' &&
+            s !== null &&
+            typeof (s as PVSection).numero === 'number' &&
+            typeof (s as PVSection).titre === 'string' &&
+            typeof (s as PVSection).contenu === 'string'
+        )
+      : undefined
+
+    const summary =
+      typeof parsed.resume === 'string' && parsed.resume.trim()
+        ? parsed.resume.trim()
+        : typeof parsed.summary === 'string' && parsed.summary.trim()
+          ? parsed.summary.trim()
+          : sections
+            ? sections.map((s) => `${s.numero}- ${s.titre}\n\n${s.contenu}`).join('\n\n')
+            : ''
+
     return {
-      summary: typeof parsed.summary === 'string' ? parsed.summary : '',
+      summary,
+      sections: sections?.length ? sections : undefined,
+      prochaine_reunion:
+        typeof parsed.prochaine_reunion === 'string' && parsed.prochaine_reunion.trim()
+          ? parsed.prochaine_reunion.trim()
+          : undefined,
       actions: Array.isArray(parsed.actions) ? parsed.actions : [],
       notes: typeof parsed.notes === 'string' ? parsed.notes : '',
     }
@@ -86,9 +169,7 @@ let anthropicClient: Anthropic | null = null
 
 function getClient(): Anthropic {
   if (!anthropicClient) {
-    anthropicClient = new Anthropic({
-      apiKey: process.env.ANTHROPIC_API_KEY!,
-    })
+    anthropicClient = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! })
   }
   return anthropicClient
 }
@@ -96,14 +177,16 @@ function getClient(): Anthropic {
 export async function generateMinutesContent(
   subject: string,
   transcription: string | null,
-  style: GenerationStyle = 'detailed'
+  participants?: Array<{ name: string }>
 ): Promise<MinutesContent> {
   const client = getClient()
-  const prompt = buildPrompt(subject, transcription, style)
+  const prompt = buildPrompt(subject, transcription, participants)
+
+  const model = 'claude-opus-4-7'
 
   try {
     const response = await client.messages.create({
-      model: 'claude-sonnet-4-6',
+      model,
       max_tokens: 16000,
       messages: [{ role: 'user', content: prompt }],
     })

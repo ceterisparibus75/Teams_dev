@@ -96,6 +96,37 @@ function numberedItem(index: number, text: string): Paragraph {
   })
 }
 
+function pvSectionHeading(numero: number, titre: string): Paragraph {
+  return new Paragraph({
+    children: [
+      new TextRun({ text: `${numero}- ${titre}`, bold: true, size: 24, color: TEAL }),
+    ],
+    border: {
+      bottom: { style: BorderStyle.SINGLE, size: 6, color: TEAL, space: 4 },
+    },
+    spacing: { before: 320, after: 160 },
+  })
+}
+
+function renderPVContent(contenu: string): Paragraph[] {
+  const result: Paragraph[] = []
+  const blocks = contenu.split('\n\n')
+  for (const block of blocks) {
+    const lines = block.split('\n')
+    for (const line of lines) {
+      const stripped = line.trim()
+      if (!stripped) continue
+      if (stripped.startsWith('- ')) {
+        result.push(bulletItem(stripped.slice(2)))
+      } else {
+        result.push(bodyParagraph(stripped))
+      }
+    }
+    result.push(empty(40))
+  }
+  return result
+}
+
 function cell(text: string, bold = false, shaded = false): TableCell {
   return new TableCell({
     children: [
@@ -265,38 +296,60 @@ export async function generateDocx(params: {
   ]
 
   // ── Ordre du jour ─────────────────────────────────────────────────────────
-  const agendaItems = sections.map((s) => s.label)
+  const pvSections = content.sections?.length ? content.sections : null
+  const agendaItems = pvSections
+    ? pvSections.map((s) => s.titre)
+    : sections.map((s) => s.label)
   const odjBlock = [
     sectionLabel('Ordre du jour'),
     ...agendaItems.map((item, i) => numberedItem(i + 1, item)),
     empty(200),
   ]
 
-  // ── Content sections ──────────────────────────────────────────────────────
   const contentBlocks: (Paragraph | Table)[] = []
 
-  for (const section of sections) {
-    contentBlocks.push(contentHeading(section.label))
-
-    if (section.id === 'summary') {
-      const text = content.summary?.trim()
-      contentBlocks.push(bodyParagraph(text || 'Aucun résumé disponible.'))
-    } else if (section.id === 'actions') {
-      if (!content.actions?.length) {
-        contentBlocks.push(bodyParagraph('Aucune action à suivre.'))
-      } else {
-        contentBlocks.push(actionsTable(content.actions))
-      }
-    } else if (section.id === 'notes') {
-      const text = content.notes?.trim()
-      if (text) contentBlocks.push(bodyParagraph(text))
-      else contentBlocks.push(bodyParagraph('—'))
-    } else {
-      const value = content[section.id]
-      if (typeof value === 'string' && value.trim()) contentBlocks.push(bodyParagraph(value))
+  if (pvSections) {
+    for (const pvSection of pvSections) {
+      contentBlocks.push(pvSectionHeading(pvSection.numero, pvSection.titre))
+      contentBlocks.push(...renderPVContent(pvSection.contenu))
     }
-
+    contentBlocks.push(empty(120))
+    contentBlocks.push(contentHeading('Actions à suivre'))
+    if (!content.actions?.length) {
+      contentBlocks.push(bodyParagraph('Aucune action à suivre.'))
+    } else {
+      contentBlocks.push(actionsTable(content.actions))
+    }
     contentBlocks.push(empty(80))
+    if (content.notes?.trim()) {
+      contentBlocks.push(contentHeading('Notes complémentaires'))
+      contentBlocks.push(bodyParagraph(content.notes.trim()))
+      contentBlocks.push(empty(80))
+    }
+  } else {
+    for (const section of sections) {
+      contentBlocks.push(contentHeading(section.label))
+
+      if (section.id === 'summary') {
+        const text = content.summary?.trim()
+        contentBlocks.push(bodyParagraph(text || 'Aucun résumé disponible.'))
+      } else if (section.id === 'actions') {
+        if (!content.actions?.length) {
+          contentBlocks.push(bodyParagraph('Aucune action à suivre.'))
+        } else {
+          contentBlocks.push(actionsTable(content.actions))
+        }
+      } else if (section.id === 'notes') {
+        const text = content.notes?.trim()
+        if (text) contentBlocks.push(bodyParagraph(text))
+        else contentBlocks.push(bodyParagraph('—'))
+      } else {
+        const value = content[section.id]
+        if (typeof value === 'string' && value.trim()) contentBlocks.push(bodyParagraph(value))
+      }
+
+      contentBlocks.push(empty(80))
+    }
   }
 
   // ── Signature ─────────────────────────────────────────────────────────────

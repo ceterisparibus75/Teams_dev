@@ -1,8 +1,8 @@
 'use client'
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { toast } from 'sonner'
-import { Download, Send, RefreshCw, AlignLeft, FileText } from 'lucide-react'
+import { Download, Send, RefreshCw } from 'lucide-react'
 import { Button, Badge } from '@/components/ui'
 import { SectionEditor } from '@/components/minutes/SectionEditor'
 import { SendModal } from '@/components/minutes/SendModal'
@@ -50,6 +50,8 @@ export default function MinutesDetailPage() {
   const [sendOpen, setSendOpen] = useState(false)
   const [saving, setSaving] = useState(false)
   const [regenerating, setRegenerating] = useState(false)
+  const [elapsed, setElapsed] = useState(0)
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   useEffect(() => {
     fetch(`/api/minutes/${id}`)
@@ -80,14 +82,24 @@ export default function MinutesDetailPage() {
     return () => clearTimeout(timer)
   }, [content, save])
 
-  async function handleRegenerate(style: 'detailed' | 'concise') {
+  useEffect(() => {
+    if (regenerating) {
+      setElapsed(0)
+      timerRef.current = setInterval(() => setElapsed((s) => s + 1), 1000)
+    } else {
+      if (timerRef.current) clearInterval(timerRef.current)
+    }
+    return () => { if (timerRef.current) clearInterval(timerRef.current) }
+  }, [regenerating])
+
+  async function handleRegenerate() {
     if (!data) return
     setRegenerating(true)
     try {
       const res = await fetch(`/api/generate/${data.meeting.id}/retranscribe`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ style }),
+        body: JSON.stringify({}),
       })
       if (!res.ok) {
         const err = (await res.json()) as ApiErrorPayload
@@ -133,6 +145,9 @@ export default function MinutesDetailPage() {
 
   const sections: TemplateSection[] = data.template?.sections ?? DEFAULT_SECTIONS
   const status = statusConfig[data.status] ?? statusConfig['DRAFT']
+  const hasPVSections = (content.sections?.length ?? 0) > 0
+  const ACTION_SECTION: TemplateSection = { id: 'actions', label: 'Actions à suivre', type: 'table', aiGenerated: true }
+  const NOTES_SECTION: TemplateSection = { id: 'notes', label: 'Notes complémentaires', type: 'text', aiGenerated: false }
 
   return (
     <div className="max-w-3xl space-y-6">
@@ -148,24 +163,24 @@ export default function MinutesDetailPage() {
             <Badge variant={status.variant}>{status.label}</Badge>
             {saving && <span className="text-xs text-gray-400">Sauvegarde…</span>}
           </div>
-          <div className="flex items-center gap-2">
+          {regenerating ? (
+            <div className="flex items-center gap-2 text-xs text-blue-600 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2">
+              <RefreshCw size={12} className="animate-spin shrink-0" />
+              <span>
+                Claude Opus rédige le procès-verbal…{' '}
+                <span className="font-mono font-semibold tabular-nums">{elapsed}s</span>
+                <span className="text-blue-400 ml-1">(1 à 2 min)</span>
+              </span>
+            </div>
+          ) : (
             <button
-              onClick={() => handleRegenerate('detailed')}
-              disabled={regenerating}
-              className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-blue-600 border border-gray-200 rounded-lg px-3 py-1.5 hover:border-blue-300 disabled:opacity-50 transition-colors"
+              onClick={handleRegenerate}
+              className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-blue-600 border border-gray-200 rounded-lg px-3 py-1.5 hover:border-blue-300 transition-colors"
             >
-              <FileText size={12} />
-              {regenerating ? 'Génération…' : 'Régénérer — Développé'}
+              <RefreshCw size={12} />
+              Régénérer le procès-verbal
             </button>
-            <button
-              onClick={() => handleRegenerate('concise')}
-              disabled={regenerating}
-              className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-blue-600 border border-gray-200 rounded-lg px-3 py-1.5 hover:border-blue-300 disabled:opacity-50 transition-colors"
-            >
-              <AlignLeft size={12} />
-              {regenerating ? 'Génération…' : 'Régénérer — Synthétique'}
-            </button>
-          </div>
+          )}
         </div>
       </div>
 
@@ -173,15 +188,65 @@ export default function MinutesDetailPage() {
         Participants : {data.meeting.participants.map((p) => p.name).join(', ')}
       </p>
 
-      {sections.map((section) => (
-        <div
-          key={section.id}
-          className="bg-white border border-gray-200 rounded-xl p-6 space-y-3"
-        >
-          <h2 className="text-lg font-semibold text-gray-900">{section.label}</h2>
-          <SectionEditor section={section} content={content} onChange={setContent} />
-        </div>
-      ))}
+      {hasPVSections ? (
+        <>
+          {content.summary && (
+            <div className="bg-blue-50 border border-blue-100 rounded-xl p-6 space-y-3">
+              <h2 className="text-sm font-semibold text-blue-700 uppercase tracking-wide">Résumé</h2>
+              <textarea
+                value={content.summary}
+                onChange={(e) => {
+                  setContent({ ...content, summary: e.target.value })
+                  e.target.style.height = 'auto'
+                  e.target.style.height = `${e.target.scrollHeight}px`
+                }}
+                rows={5}
+                style={{ minHeight: '5rem' }}
+                className="w-full bg-transparent border border-blue-200 rounded-lg p-3 text-sm text-gray-700 leading-relaxed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 resize-y overflow-auto"
+              />
+            </div>
+          )}
+          {content.sections!.map((pvSection, i) => (
+            <div key={pvSection.numero} className="bg-white border border-gray-200 rounded-xl p-6 space-y-3">
+              <h2 className="text-lg font-semibold text-gray-900">
+                {pvSection.numero}- {pvSection.titre}
+              </h2>
+              <textarea
+                value={pvSection.contenu}
+                onChange={(e) => {
+                  const newSections = content.sections!.map((s, j) =>
+                    j === i ? { ...s, contenu: e.target.value } : s
+                  )
+                  setContent({ ...content, sections: newSections })
+                  e.target.style.height = 'auto'
+                  e.target.style.height = `${e.target.scrollHeight}px`
+                }}
+                rows={12}
+                style={{ minHeight: '12rem' }}
+                className="w-full border border-gray-200 rounded-lg p-4 text-sm text-gray-700 leading-relaxed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 resize-y overflow-auto font-mono"
+              />
+            </div>
+          ))}
+          <div className="bg-white border border-gray-200 rounded-xl p-6 space-y-3">
+            <h2 className="text-lg font-semibold text-gray-900">Actions à suivre</h2>
+            <SectionEditor section={ACTION_SECTION} content={content} onChange={setContent} />
+          </div>
+          <div className="bg-white border border-gray-200 rounded-xl p-6 space-y-3">
+            <h2 className="text-lg font-semibold text-gray-900">Notes complémentaires</h2>
+            <SectionEditor section={NOTES_SECTION} content={content} onChange={setContent} />
+          </div>
+        </>
+      ) : (
+        sections.map((section) => (
+          <div
+            key={section.id}
+            className="bg-white border border-gray-200 rounded-xl p-6 space-y-3"
+          >
+            <h2 className="text-lg font-semibold text-gray-900">{section.label}</h2>
+            <SectionEditor section={section} content={content} onChange={setContent} />
+          </div>
+        ))
+      )}
 
       <div className="flex gap-3 pt-2">
         <a href={`/api/export/${id}`} target="_blank" rel="noreferrer">

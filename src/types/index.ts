@@ -5,10 +5,18 @@ export interface TemplateSection {
   aiGenerated: boolean
 }
 
+export interface PVSection {
+  numero: number
+  titre: string
+  contenu: string
+}
+
 export interface MinutesContent {
   summary: string
   actions: Array<{ description: string; responsable: string; echeance: string }>
   notes: string
+  sections?: PVSection[]
+  prochaine_reunion?: string
   [key: string]: unknown
 }
 
