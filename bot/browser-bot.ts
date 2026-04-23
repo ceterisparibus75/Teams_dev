@@ -291,11 +291,11 @@ export async function joinMeeting(meeting: MeetingTarget): Promise<void> {
       const transcript = await transcribeAudio(audioFile)
       console.log(`[bot] "${meeting.subject}" — transcription : ${transcript ? transcript.split(' ').length + ' mots' : 'échec'}`)
 
-      await triggerGeneration(meeting.id, transcript)
+      const generated = await triggerGeneration(meeting.id, transcript)
 
       await prisma.meeting.update({
         where: { id: meeting.id },
-        data: { botStatus: 'DONE' },
+        data: { botStatus: generated ? 'DONE' : 'FAILED' },
       })
     } catch (err) {
       console.error(`[bot] Erreur transcription/génération pour "${meeting.subject}":`, err)

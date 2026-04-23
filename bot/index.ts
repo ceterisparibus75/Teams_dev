@@ -30,13 +30,8 @@ export const prisma = new PrismaClient()
 export async function triggerGeneration(
   meetingDbId: string,
   transcript: string | null
-): Promise<void> {
+): Promise<boolean> {
   try {
-    await prisma.meeting.update({
-      where: { id: meetingDbId },
-      data: { hasTranscription: !!transcript, processedAt: new Date() },
-    })
-
     const res = await fetch(`${process.env.APP_URL}/api/bot-generate/${meetingDbId}`, {
       method: 'POST',
       headers: {
@@ -47,12 +42,19 @@ export async function triggerGeneration(
     })
 
     if (res.ok) {
+      await prisma.meeting.update({
+        where: { id: meetingDbId },
+        data: { hasTranscription: !!transcript, processedAt: new Date() },
+      })
       console.log(`[bot] Compte rendu généré pour ${meetingDbId}`)
-    } else {
-      console.error('[bot] Erreur génération:', await res.text())
+      return true
     }
+
+    console.error('[bot] Erreur génération:', await res.text())
+    return false
   } catch (err) {
     console.error('[bot] triggerGeneration error:', err)
+    return false
   }
 }
 

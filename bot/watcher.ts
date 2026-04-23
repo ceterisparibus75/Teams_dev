@@ -212,6 +212,7 @@ function toUtc(dt: string): Date {
 
 // 3 minutes d'avance pour que le bot soit prêt avant le début
 const BOT_LEAD_TIME_MS = 3 * 60 * 1000
+const TRANSCRIPT_RETRY_WINDOW_MS = 2 * 60 * 60 * 1000
 
 async function syncCalendarMeetings(): Promise<void> {
   const users = await prisma.user.findMany({
@@ -354,21 +355,34 @@ async function processEndedMeetings(): Promise<void> {
     if (processingMeetings.has(meeting.id)) continue
     processingMeetings.add(meeting.id)
 
-    // Mark as processed immediately to prevent infinite retry loops if triggerGeneration fails
-    await prisma.meeting.update({
-      where: { id: meeting.id },
-      data: { processedAt: new Date() },
-    }).catch(() => {})
+    try {
+      console.log(`[bot] Réunion Teams terminée : "${meeting.subject}" — récupération transcription…`)
 
-    console.log(`[bot] Réunion Teams terminée : "${meeting.subject}" — récupération transcription…`)
+      const transcript =
+        meeting.organizer.microsoftId && meeting.joinUrl
+          ? await fetchTranscript(meeting.organizer.microsoftId, meeting.joinUrl)
+          : null
 
-    const transcript =
-      meeting.organizer.microsoftId && meeting.joinUrl
-        ? await fetchTranscript(meeting.organizer.microsoftId, meeting.joinUrl)
-        : null
+      if (transcript) {
+        await triggerGeneration(meeting.id, transcript)
+        continue
+      }
 
-    await triggerGeneration(meeting.id, transcript)
-    processingMeetings.delete(meeting.id)
+      const retryDeadline = new Date(meeting.endDateTime.getTime() + TRANSCRIPT_RETRY_WINDOW_MS)
+      if (retryDeadline > now) {
+        console.log(
+          `[bot] Transcription indisponible pour "${meeting.subject}" — nouvelle tentative jusqu'à ${retryDeadline.toISOString()}`
+        )
+        continue
+      }
+
+      console.warn(
+        `[bot] Transcription introuvable après attente pour "${meeting.subject}" — génération sans transcription`
+      )
+      await triggerGeneration(meeting.id, null)
+    } finally {
+      processingMeetings.delete(meeting.id)
+    }
   }
 }
 
