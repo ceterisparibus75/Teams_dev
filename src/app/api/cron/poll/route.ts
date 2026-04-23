@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma'
 import { getAttendanceWarning } from '@/lib/attendance-warning'
 import { getAttendanceLookup, getMeetingsEndedInLastHours, getTranscription } from '@/lib/microsoft-graph'
 import { generateMinutesContent } from '@/lib/azure-openai'
+import { extractVttDurationMinutes } from '@/lib/utils'
 
 // Cooldown in-memory : protège contre les replay attacks (token intercepté)
 // Vercel Cron tourne toutes les 2h — cooldown 90 min laisse une marge confortable
@@ -113,9 +114,14 @@ export async function GET(req: NextRequest) {
         },
       })
 
+      const durationMinutes = transcription ? extractVttDurationMinutes(transcription) : null
       await prisma.meeting.update({
         where: { id: gm.id },
-        data: { hasTranscription: !!transcription, processedAt: new Date() },
+        data: {
+          hasTranscription: !!transcription,
+          processedAt: new Date(),
+          ...(durationMinutes !== null && { durationMinutes }),
+        },
       })
 
       processed++

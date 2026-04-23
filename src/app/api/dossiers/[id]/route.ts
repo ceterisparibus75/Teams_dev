@@ -23,6 +23,7 @@ export async function GET(
           subject: true,
           startDateTime: true,
           endDateTime: true,
+          durationMinutes: true,
           hasTranscription: true,
           minutes: { select: { id: true, status: true, content: true } },
         },

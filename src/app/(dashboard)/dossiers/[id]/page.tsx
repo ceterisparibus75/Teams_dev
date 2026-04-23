@@ -39,17 +39,26 @@ interface MeetingRef {
   subject: string
   startDateTime: string
   endDateTime: string
+  durationMinutes: number | null
   hasTranscription: boolean
   minutes: { id: string; status: string; summary: string | null } | null
 }
 
-function formatDuration(start: string, end: string): string {
-  const totalMinutes = Math.round((new Date(end).getTime() - new Date(start).getTime()) / 60000)
-  if (totalMinutes <= 0) return ''
-  if (totalMinutes < 60) return `${totalMinutes} min`
-  const h = Math.floor(totalMinutes / 60)
-  const m = totalMinutes % 60
+function formatDuration(minutes: number): string {
+  if (minutes <= 0) return ''
+  if (minutes < 60) return `${minutes} min`
+  const h = Math.floor(minutes / 60)
+  const m = minutes % 60
   return m > 0 ? `${h}h${m.toString().padStart(2, '0')}` : `${h}h`
+}
+
+function getMeetingDuration(m: MeetingRef): string {
+  if (m.durationMinutes != null) return formatDuration(m.durationMinutes)
+  if (m.endDateTime) {
+    const mins = Math.round((new Date(m.endDateTime).getTime() - new Date(m.startDateTime).getTime()) / 60000)
+    return formatDuration(mins)
+  }
+  return ''
 }
 
 interface DossierData {
@@ -295,6 +304,7 @@ export default function DossierDetailPage() {
           dossier.meetings.map((m) => {
             const latestMinutes = m.minutes
             const ms = latestMinutes ? MINUTES_STATUS[latestMinutes.status] : null
+            const duration = getMeetingDuration(m)
             return (
               <div
                 key={m.id}
@@ -304,12 +314,8 @@ export default function DossierDetailPage() {
                   <p className="text-sm font-medium text-gray-900">{m.subject}</p>
                   <p className="text-xs text-gray-400">
                     {formatDateTime(m.startDateTime)}
-                    {m.endDateTime && (
-                      <span className="ml-2 text-gray-300">·</span>
-                    )}
-                    {m.endDateTime && (
-                      <span className="ml-2">{formatDuration(m.startDateTime, m.endDateTime)}</span>
-                    )}
+                    {duration && <span className="ml-2 text-gray-300">·</span>}
+                    {duration && <span className="ml-2">{duration}</span>}
                   </p>
                   {m.minutes?.summary && (
                     <p className="text-xs text-gray-500 leading-relaxed line-clamp-4 pt-0.5">

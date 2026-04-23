@@ -5,6 +5,7 @@ import { prisma } from '@/lib/prisma'
 import { getAttendanceLookup, getTranscription } from '@/lib/microsoft-graph'
 import { generateMinutesContent, createSkeletonContent } from '@/lib/azure-openai'
 import { getAttendanceWarning } from '@/lib/attendance-warning'
+import { extractVttDurationMinutes } from '@/lib/utils'
 import type { Prisma } from '@prisma/client'
 
 // Plan Pro : 300 s max. Le handler répond en < 1 s (squelette),
@@ -78,9 +79,14 @@ export async function POST(
 
       const transcription = await getTranscription(userId, joinUrl, { subject: meetingSubject })
 
+      const durationMinutes = transcription ? extractVttDurationMinutes(transcription) : null
       await prisma.meeting.update({
         where: { id: meetingId },
-        data: { hasTranscription: !!transcription, processedAt: new Date() },
+        data: {
+          hasTranscription: !!transcription,
+          processedAt: new Date(),
+          ...(durationMinutes !== null && { durationMinutes }),
+        },
       })
 
       if (!transcription) {
