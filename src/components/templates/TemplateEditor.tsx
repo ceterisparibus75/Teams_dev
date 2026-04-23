@@ -51,9 +51,9 @@ const DEFAULT_FORM: TemplateFormData = {
   piedPageAlignement: 'centre',
   numeroterPages: true,
   formatNumerotation: 'Page {n} sur {total}',
-  policeCorps: 'Cambria',
+  policeCorps: 'Utsaah',
   taillePoliceCorps: 11,
-  policeTitres: 'Cambria',
+  policeTitres: 'Utsaah',
   taillePoliceTitre1: 14,
   taillePoliceTitre2: 12,
   couleurTitres: '1F3864',
@@ -77,7 +77,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'mise_en_page', label: 'Mise en page' },
 ]
 
-const FONTS = ['Cambria', 'Calibri', 'Arial', 'Times New Roman', 'Georgia']
+const FONTS = ['Utsaah', 'Cambria', 'Calibri', 'Arial', 'Times New Roman', 'Georgia']
 
 const ALIGNEMENTS = [
   { value: 'gauche', label: 'Gauche' },

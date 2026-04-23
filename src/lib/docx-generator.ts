@@ -163,7 +163,7 @@ function dataCell(text: string, shaded = false, bgColor = 'F5F5F5'): TableCell {
 // ─── En-tête du document ──────────────────────────────────────────────────────
 
 function buildHeader(cfg: TemplateConfig, logoBuffer: Buffer | null): Header {
-  const children: Paragraph[] = []
+  const children: (Paragraph | Table)[] = []
 
   // Logo depuis base64 ou fichier public/bl-logo.png par défaut
   const imageBuffer = logoBuffer ?? (() => {
@@ -187,48 +187,32 @@ function buildHeader(cfg: TemplateConfig, logoBuffer: Buffer | null): Header {
     }))
   } else if (imageBuffer && cfg.enteteTexteLignes.length > 0) {
     // Logo à gauche, texte à droite via tableau invisible
-    const logoCell = new TableCell({
-      children: [new Paragraph({
-        children: [new ImageRun({
-          data: imageBuffer,
-          transformation: { width: logoWidthPx, height: logoHeightPx },
-          type: 'png',
-        })],
+    const noBorder = { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' }
+    const noBorders = { top: noBorder, bottom: noBorder, left: noBorder, right: noBorder }
+    children.push(new Table({
+      width: { size: 100, type: WidthType.PERCENTAGE },
+      borders: { ...noBorders, insideHorizontal: noBorder, insideVertical: noBorder },
+      rows: [new TableRow({
+        children: [
+          new TableCell({
+            children: [new Paragraph({
+              children: [new ImageRun({ data: imageBuffer, transformation: { width: logoWidthPx, height: logoHeightPx }, type: 'png' })],
+            })],
+            borders: noBorders,
+            width: { size: 40, type: WidthType.PERCENTAGE },
+          }),
+          new TableCell({
+            children: cfg.enteteTexteLignes.map((line, i) => new Paragraph({
+              alignment: alignmentFor(cfg.enteteAlignement),
+              children: [new TextRun({ text: line, size: i === 0 ? 20 : 16, color: cfg.couleurEnteteCabinet, bold: i === 0 })],
+              spacing: { after: 40 },
+            })),
+            borders: noBorders,
+            width: { size: 60, type: WidthType.PERCENTAGE },
+          }),
+        ],
       })],
-      borders: {
-        top: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' },
-        bottom: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' },
-        left: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' },
-        right: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' },
-      },
-      width: { size: 50, type: WidthType.PERCENTAGE },
-    })
-    const textCell = new TableCell({
-      children: cfg.enteteTexteLignes.map((line) => new Paragraph({
-        alignment: alignmentFor(cfg.enteteAlignement),
-        children: [new TextRun({ text: line, size: 18, color: cfg.couleurEnteteCabinet })],
-        spacing: { after: 40 },
-      })),
-      borders: {
-        top: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' },
-        bottom: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' },
-        left: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' },
-        right: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' },
-      },
-      width: { size: 50, type: WidthType.PERCENTAGE },
-      verticalAlign: 'center' as unknown as undefined,
-    })
-    children.push(new Paragraph({
-      children: [],
-      spacing: { after: 0 },
     }))
-    // Fallback : texte seul si le tableau échoue (simplifié)
-    children.push(...cfg.enteteTexteLignes.map((line) => new Paragraph({
-      alignment: alignmentFor(cfg.enteteAlignement),
-      children: [new TextRun({ text: line, size: 18, color: cfg.couleurEnteteCabinet })],
-      spacing: { after: 40 },
-    })))
-    void logoCell; void textCell  // les références restent pour future amélioration
   } else if (cfg.enteteTexteLignes.length > 0) {
     // Texte seul
     cfg.enteteTexteLignes.forEach((line) => {
