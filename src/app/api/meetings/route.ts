@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
-import { getRecentMeetings } from '@/lib/microsoft-graph'
+import { getRecentMeetings, getTranscription } from '@/lib/microsoft-graph'
 
 export async function GET(req: NextRequest) {
   const session = await getServerSession(authOptions)
@@ -96,6 +96,7 @@ export async function GET(req: NextRequest) {
         startDateTime: true,
         endDateTime: true,
         hasTranscription: true,
+        joinUrl: true,
         platform: true,
         botStatus: true,
         botScheduledAt: true,
@@ -106,7 +107,41 @@ export async function GET(req: NextRequest) {
       take: 30,
     })
 
-    return NextResponse.json(meetings)
+    // Vérifier les transcriptions disponibles pour les réunions terminées sans flag
+    const now = new Date()
+    const toCheck = meetings
+      .filter((m) => !m.hasTranscription && m.joinUrl && new Date(m.endDateTime) < now)
+      .slice(0, 5)
+
+    const updatedIds = new Set<string>()
+    if (toCheck.length > 0) {
+      await Promise.all(
+        toCheck.map(async (m) => {
+          try {
+            const transcription = await getTranscription(session.user.id, m.joinUrl!, {
+              subject: m.subject,
+            })
+            if (transcription) {
+              await prisma.meeting.update({
+                where: { id: m.id },
+                data: { hasTranscription: true },
+              })
+              updatedIds.add(m.id)
+            }
+          } catch {
+            // Silencieux — pas de transcription disponible ou erreur Graph
+          }
+        })
+      )
+    }
+
+    // Retourner sans joinUrl (non nécessaire côté client) + flags mis à jour
+    return NextResponse.json(
+      meetings.map(({ joinUrl: _joinUrl, ...m }) => ({
+        ...m,
+        hasTranscription: updatedIds.has(m.id) ? true : m.hasTranscription,
+      }))
+    )
   } catch (error) {
     console.error('[meetings/GET]', error)
     return NextResponse.json({ error: 'Erreur serveur' }, { status: 500 })
