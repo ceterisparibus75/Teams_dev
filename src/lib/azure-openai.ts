@@ -358,15 +358,17 @@ export async function generateMinutesContent(
     model
   )
 
+  // stream().finalMessage() est requis par l'API Anthropic pour les appels
+  // qui pourraient dépasser 10 minutes (max_tokens élevé + transcription longue)
   const callClaude = () =>
-    client.messages.create({
+    client.messages.stream({
       model,
       max_tokens: 32000,
       system: systemPrompt,
       tools: [GENERER_PV_TOOL],
       tool_choice: { type: 'tool', name: 'generer_pv' },
       messages: [{ role: 'user', content: userMessage }],
-    })
+    }).finalMessage()
 
   const extractToolInput = (response: Awaited<ReturnType<typeof callClaude>>) => {
     if (response.stop_reason === 'max_tokens') {

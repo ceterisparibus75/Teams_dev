@@ -79,6 +79,18 @@ const TABS: { id: Tab; label: string }[] = [
 
 const FONTS = ['Utsaah', 'Cambria', 'Calibri', 'Arial', 'Times New Roman', 'Georgia']
 
+// Migration : corrige les valeurs héritées de l'ancienne charte graphique
+function applyLegacyMigration(data: Partial<TemplateFormData>): Partial<TemplateFormData> {
+  const m = { ...data }
+  if (m.policeCorps === 'Cambria') m.policeCorps = 'Utsaah'
+  if (m.policeTitres === 'Cambria') m.policeTitres = 'Utsaah'
+  if (m.couleurTitres === '1F3864') m.couleurTitres = '6AAFAB'
+  if (m.couleurEnteteCabinet === '1F3864') m.couleurEnteteCabinet = '6AAFAB'
+  if (m.couleurEnteteTableau === 'D9E2F3') m.couleurEnteteTableau = 'E5F5F4'
+  if (m.couleurBordureTableau === 'BFBFBF') m.couleurBordureTableau = 'AFDAD7'
+  return m
+}
+
 const ALIGNEMENTS = [
   { value: 'gauche', label: 'Gauche' },
   { value: 'centre', label: 'Centre' },
@@ -197,138 +209,126 @@ function LignesEditor({
 
 // ─── Aperçu du document ───────────────────────────────────────────────────────
 
+// Simule une page A4 (794px à 96dpi) mise à l'échelle dans le conteneur aperçu
+const DOC_WIDTH = 794
+const CM = 37.8 // 1 cm en pixels à 96dpi
+
 function TemplatePreview({ form }: { form: TemplateFormData }) {
   const titleColor = `#${form.couleurTitres}`
   const bodyColor = `#${form.couleurCorps}`
-  const headerBg = `#${form.couleurEnteteCabinet}`
+  const headerColor = `#${form.couleurEnteteCabinet}`
   const tableHeaderBg = `#${form.couleurEnteteTableau}`
   const tableBorder = `#${form.couleurBordureTableau}`
 
-  const alignClass = (a: string) =>
-    a === 'droite' ? 'text-right' : a === 'centre' ? 'text-center' : 'text-left'
+  const mL = form.margeGaucheCm * CM
+  const mR = form.margeDroiteCm * CM
+  const mT = form.margeHautCm * CM
+
+  const logoWidthPx = form.logoLargeurCm * CM
+
+  // Alignement texte en-tête et pied de page
+  const textAlign = (a: string): React.CSSProperties['textAlign'] =>
+    a === 'droite' ? 'right' : a === 'centre' ? 'center' : 'left'
+
+  // Logo à gauche ou à droite selon l'alignement en-tête
+  const headerReversed = form.enteteAlignement === 'droite'
 
   return (
-    <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden text-[10px]">
-      {/* Bande titre aperçu */}
-      <div className="bg-gray-50 border-b border-gray-200 px-3 py-1.5">
-        <span className="text-xs text-gray-400 font-medium">Aperçu</span>
-      </div>
-
-      {/* En-tête document */}
-      <div className="px-5 pt-4 pb-3 flex items-start gap-3" style={{ borderBottom: `2px solid ${headerBg}` }}>
-        {form.logoBase64 && (
-          <img
-            src={form.logoBase64}
-            alt="Logo"
-            style={{ width: `${form.logoLargeurCm * 11}px`, objectFit: 'contain', flexShrink: 0 }}
-          />
-        )}
+    <div className="space-y-2">
+      <p className="text-xs font-medium text-gray-500">Aperçu du document</p>
+      {/* Conteneur grisé simulant la page dans un environnement */}
+      <div className="bg-gray-200 rounded-xl p-3 overflow-hidden">
+        {/* Zone de mise à l'échelle — on expose ~600px du haut de l'A4 */}
         <div
-          className={`flex-1 ${alignClass(form.enteteAlignement)} leading-tight`}
-          style={{ fontFamily: form.policeTitres, color: headerBg }}
+          className="relative overflow-hidden rounded shadow-lg"
+          style={{ height: 340 }}
         >
-          {form.enteteTexteLignes.map((l, i) => (
-            <div key={i} className={i === 0 ? 'font-bold' : 'text-[9px]'}>{l || '…'}</div>
-          ))}
-        </div>
-      </div>
+          <div
+            style={{
+              width: DOC_WIDTH,
+              background: 'white',
+              transformOrigin: 'top left',
+              transform: `scale(${440 / DOC_WIDTH})`,
+              position: 'absolute',
+              top: 0,
+              left: 0,
+            }}
+          >
+            {/* ── En-tête ── */}
+            <div
+              style={{
+                padding: `${mT}px ${mR}px 14px ${mL}px`,
+                borderBottom: `3px solid ${headerColor}`,
+                display: 'flex',
+                flexDirection: headerReversed ? 'row-reverse' : 'row',
+                alignItems: 'flex-start',
+                gap: 20,
+              }}
+            >
+              {form.logoBase64 && (
+                <img
+                  src={form.logoBase64}
+                  alt="Logo"
+                  style={{ width: logoWidthPx, objectFit: 'contain', flexShrink: 0 }}
+                />
+              )}
+              <div style={{ flex: 1, textAlign: textAlign(form.enteteAlignement), fontFamily: form.policeTitres, color: headerColor, lineHeight: 1.3 }}>
+                {form.enteteTexteLignes.map((l, i) => (
+                  <div key={i} style={{ fontSize: i === 0 ? 14 : 11, fontWeight: i === 0 ? 700 : 400 }}>{l || '…'}</div>
+                ))}
+              </div>
+            </div>
 
-      {/* Titre */}
-      <div className="px-5 pt-3 text-center">
-        <div
-          style={{
-            fontFamily: form.policeTitres,
-            fontSize: `${form.taillePoliceTitre1 * 0.75}px`,
-            color: titleColor,
-            fontWeight: 'bold',
-            letterSpacing: '0.05em',
-          }}
-        >
-          PROCÈS-VERBAL DE RÉUNION
-        </div>
-        <div
-          style={{
-            fontFamily: form.policeTitres,
-            fontSize: `${form.taillePoliceTitre2 * 0.75}px`,
-            color: titleColor,
-            marginTop: 2,
-          }}
-        >
-          Société Exemple SAS — 15 janvier 2025
-        </div>
-      </div>
+            {/* ── Titre centré ── */}
+            <div style={{ padding: `24px ${mR}px 16px ${mL}px`, textAlign: 'center' }}>
+              <div style={{ fontFamily: form.policeTitres, fontSize: form.taillePoliceTitre1, color: titleColor, fontWeight: 'bold', letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+                Procès-verbal de réunion
+              </div>
+              <div style={{ fontFamily: form.policeTitres, fontSize: form.taillePoliceTitre2, color: titleColor, marginTop: 6 }}>
+                Société Exemple SAS — 15 janvier 2025
+              </div>
+            </div>
 
-      {/* Paragraphe corps */}
-      <div className="px-5 py-2">
-        <p
-          style={{
-            fontFamily: form.policeCorps,
-            fontSize: `${form.taillePoliceCorps * 0.75}px`,
-            color: bodyColor,
-            lineHeight: form.interligne,
-            textAlign: form.justifierCorps ? 'justify' : 'left',
-          }}
-        >
-          La réunion s&apos;est tenue le 15 janvier 2025 à 10h00. Étaient présents les représentants
-          de la société, l&apos;administrateur judiciaire et les membres du cabinet.
-        </p>
-      </div>
+            {/* ── Corps ── */}
+            <div style={{ padding: `0 ${mR}px 16px ${mL}px` }}>
+              <p style={{ fontFamily: form.policeCorps, fontSize: form.taillePoliceCorps, color: bodyColor, lineHeight: form.interligne, textAlign: form.justifierCorps ? 'justify' : 'left', margin: 0 }}>
+                La réunion s&apos;est tenue le 15 janvier 2025 à 10h00 par visioconférence. Étaient présents les représentants de la société, l&apos;administrateur judiciaire et les membres du cabinet BL &amp; Associés, ainsi que les représentants des établissements bancaires partenaires.
+              </p>
+            </div>
 
-      {/* Tableau */}
-      <div className="px-5 pb-2">
-        <table className="w-full border-collapse">
-          <thead>
-            <tr style={{ backgroundColor: tableHeaderBg }}>
-              {['Action', 'Responsable', 'Échéance'].map((h) => (
-                <th
-                  key={h}
-                  className="text-left p-1.5 border"
-                  style={{
-                    borderColor: tableBorder,
-                    fontFamily: form.policeTitres,
-                    color: titleColor,
-                    fontSize: `${form.taillePoliceTitre2 * 0.65}px`,
-                  }}
-                >
-                  {h}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              {['Rédiger rapport', 'J. Dupont', '01/02/2025'].map((v, i) => (
-                <td
-                  key={i}
-                  className="p-1.5 border"
-                  style={{
-                    borderColor: tableBorder,
-                    fontFamily: form.policeCorps,
-                    color: bodyColor,
-                    fontSize: `${form.taillePoliceCorps * 0.65}px`,
-                  }}
-                >
-                  {v}
-                </td>
-              ))}
-            </tr>
-          </tbody>
-        </table>
-      </div>
+            {/* ── Tableau ── */}
+            <div style={{ padding: `0 ${mR}px 16px ${mL}px` }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr style={{ backgroundColor: tableHeaderBg }}>
+                    {['Action', 'Responsable', 'Échéance'].map((h) => (
+                      <th key={h} style={{ padding: '8px 10px', border: `1px solid ${tableBorder}`, fontFamily: form.policeTitres, color: titleColor, fontSize: form.taillePoliceTitre2 - 1, textAlign: 'left', fontWeight: 600 }}>
+                        {h}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    {['Rédiger le rapport financier', 'J. Dupont (Cabinet)', '01/02/2025'].map((v, i) => (
+                      <td key={i} style={{ padding: '8px 10px', border: `1px solid ${tableBorder}`, fontFamily: form.policeCorps, color: bodyColor, fontSize: form.taillePoliceCorps }}>
+                        {v}
+                      </td>
+                    ))}
+                  </tr>
+                </tbody>
+              </table>
+            </div>
 
-      {/* Pied de page */}
-      <div
-        className={`px-5 py-2 border-t border-gray-100 mt-1 ${alignClass(form.piedPageAlignement)}`}
-        style={{ fontFamily: form.policeCorps, color: `${bodyColor}99` }}
-      >
-        {form.piedPageLignes.map((l, i) => (
-          <div key={i} style={{ fontSize: `${form.taillePoliceCorps * 0.65}px` }}>{l || '…'}</div>
-        ))}
-        {form.numeroterPages && (
-          <div style={{ fontSize: `${form.taillePoliceCorps * 0.65}px` }}>
-            {form.formatNumerotation.replace('{n}', '1').replace('{total}', '3')}
+            {/* ── Pied de page ── */}
+            <div style={{ padding: `10px ${mR}px`, borderTop: '1px solid #e5e7eb', textAlign: textAlign(form.piedPageAlignement), fontFamily: form.policeCorps, color: `${bodyColor}99`, fontSize: form.taillePoliceCorps - 1 }}>
+              {form.piedPageLignes.map((l, i) => <div key={i}>{l || '…'}</div>)}
+              {form.numeroterPages && (
+                <div>{form.formatNumerotation.replace('{n}', '1').replace('{total}', '3')}</div>
+              )}
+            </div>
           </div>
-        )}
+        </div>
       </div>
     </div>
   )
@@ -344,7 +344,7 @@ interface Props {
 
 export function TemplateEditor({ initial, onSaved, onCancel }: Props) {
   const [tab, setTab] = useState<Tab>('general')
-  const [form, setForm] = useState<TemplateFormData>({ ...DEFAULT_FORM, ...initial })
+  const [form, setForm] = useState<TemplateFormData>({ ...DEFAULT_FORM, ...applyLegacyMigration(initial ?? {}) })
   const [saving, setSaving] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
 
@@ -377,7 +377,7 @@ export function TemplateEditor({ initial, onSaved, onCancel }: Props) {
   }
 
   return (
-    <div className="grid grid-cols-1 xl:grid-cols-[1fr_340px] gap-6">
+    <div className="grid grid-cols-1 xl:grid-cols-[1fr_480px] gap-6">
       {/* ── Formulaire ── */}
       <div className="space-y-4">
         {/* Onglets */}
@@ -661,10 +661,8 @@ export function TemplateEditor({ initial, onSaved, onCancel }: Props) {
       </div>
 
       {/* ── Aperçu (colonne droite) ── */}
-      <div className="hidden xl:block">
-        <div className="sticky top-4">
-          <TemplatePreview form={form} />
-        </div>
+      <div className="sticky top-4">
+        <TemplatePreview form={form} />
       </div>
     </div>
   )
