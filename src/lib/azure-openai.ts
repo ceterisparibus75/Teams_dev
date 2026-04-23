@@ -263,8 +263,11 @@ export function createSkeletonContent(
 
 // ─── Prompt builder (conservé pour les tests unitaires) ───────────────────────
 
-// Limite la transcription pour éviter les réponses vides ou tronquées de Claude
-const MAX_TRANSCRIPT_CHARS = 200_000
+// Transcription tronquée pour rester dans un budget de tokens raisonnable.
+// Stratégie début+fin : on conserve l'ouverture (contexte, participants, enjeux)
+// et la clôture (décisions, actions, prochaine réunion).
+const MAX_HEAD_CHARS = 50_000
+const MAX_TAIL_CHARS = 10_000
 
 export function buildPrompt(
   subject: string,
@@ -276,8 +279,10 @@ export function buildPrompt(
     : ''
 
   let safeTranscription = transcription
-  if (safeTranscription && safeTranscription.length > MAX_TRANSCRIPT_CHARS) {
-    safeTranscription = safeTranscription.slice(0, MAX_TRANSCRIPT_CHARS) + '\n[Transcription tronquée — fin non incluse]'
+  if (safeTranscription && safeTranscription.length > MAX_HEAD_CHARS + MAX_TAIL_CHARS) {
+    const head = safeTranscription.slice(0, MAX_HEAD_CHARS)
+    const tail = safeTranscription.slice(-MAX_TAIL_CHARS)
+    safeTranscription = `${head}\n\n[… ${(safeTranscription.length - MAX_HEAD_CHARS - MAX_TAIL_CHARS).toLocaleString('fr')} caractères omis …]\n\n${tail}`
   }
 
   const transcriptionBlock = safeTranscription
@@ -359,11 +364,12 @@ export async function generateMinutesContent(
   )
 
   // stream().finalMessage() est requis par l'API Anthropic pour les appels
-  // qui pourraient dépasser 10 minutes (max_tokens élevé + transcription longue)
+  // qui pourraient dépasser 10 minutes.
+  // max_tokens=8000 est largement suffisant pour un PV détaillé (4-5 pages ≈ 3500 tokens).
   const callClaude = () =>
     client.messages.stream({
       model,
-      max_tokens: 32000,
+      max_tokens: 8000,
       system: systemPrompt,
       tools: [GENERER_PV_TOOL],
       tool_choice: { type: 'tool', name: 'generer_pv' },
@@ -371,20 +377,25 @@ export async function generateMinutesContent(
     }).finalMessage()
 
   const extractToolInput = (response: Awaited<ReturnType<typeof callClaude>>) => {
+    console.log(
+      '[Claude] stop_reason=%s, content blocks: %s',
+      response.stop_reason,
+      response.content.map((b) => b.type).join(', ')
+    )
     if (response.stop_reason === 'max_tokens') {
-      console.warn('[Claude] stop_reason=max_tokens — réponse tronquée, JSON probablement incomplet')
+      console.warn('[Claude] stop_reason=max_tokens — JSON probablement tronqué')
     }
     const block = response.content.find((b) => b.type === 'tool_use')
     if (!block || block.type !== 'tool_use') {
-      console.warn('[Claude] Aucun bloc tool_use dans la réponse (stop_reason=%s)', response.stop_reason)
+      console.warn('[Claude] Aucun bloc tool_use (stop_reason=%s) — content: %j', response.stop_reason, response.content)
       return null
     }
     const input = block.input as Record<string, unknown>
     const keyCount = Object.keys(input).length
+    console.log('[Claude] tool_use reçu — %d clé(s) de premier niveau: %s', keyCount, Object.keys(input).join(', '))
     if (keyCount < 2) {
       console.warn('[Claude] Input vide ou incomplet (%d clé(s)), stop_reason=%s', keyCount, response.stop_reason)
     }
-    // Réponse vide : Claude a appelé l'outil sans arguments
     return keyCount >= 2 ? input : null
   }
 
