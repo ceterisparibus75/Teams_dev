@@ -60,6 +60,7 @@ export default function MinutesDetailPage() {
   const [validating, setValidating] = useState(false)
   const [regenerating, setRegenerating] = useState(false)
   const [generating, setGenerating] = useState(false)
+  const [generationError, setGenerationError] = useState<string | null>(null)
   const [elapsed, setElapsed] = useState(0)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -80,6 +81,7 @@ export default function MinutesDetailPage() {
         setData(d as MinutesData)
         setContent(d.content as MinutesContent)
         setGenerating(d.generating === true)
+        setGenerationError(typeof d.generationError === 'string' ? d.generationError : null)
       })
       .catch(() => setLoadError('Impossible de charger le compte rendu.'))
   }, [id])
@@ -97,7 +99,13 @@ export default function MinutesDetailPage() {
           if (r.ok && d.content) {
             setData(d as MinutesData)
             setContent(d.content as MinutesContent)
-            toast.success('Compte rendu généré par Claude !')
+            const errMsg = typeof d.generationError === 'string' ? d.generationError : null
+            setGenerationError(errMsg)
+            if (errMsg) {
+              toast.error('Échec de la génération Claude')
+            } else {
+              toast.success('Compte rendu généré par Claude !')
+            }
           }
         }
       } catch { /* silencieux */ }
@@ -342,7 +350,14 @@ export default function MinutesDetailPage() {
         </div>
       )}
 
-      {!generating && content.notes?.includes('sans transcription') && (
+      {generationError && !generating && (
+        <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-sm text-red-800 space-y-1">
+          <p><strong>La génération Claude a échoué.</strong> Le brouillon ci-dessous est vide — utilisez <strong>Régénérer le procès-verbal</strong> pour relancer.</p>
+          <p className="text-xs text-red-600 font-mono">{generationError}</p>
+        </div>
+      )}
+
+      {!generating && !generationError && content.notes?.includes('sans transcription') && (
         <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-800">
           <strong>Aucune transcription Teams disponible</strong> — ce brouillon a été créé avec un contenu vide à compléter manuellement.
           Pour générer un vrai procès-verbal, démarrez la transcription dans la réunion Teams puis cliquez sur <strong>Régénérer le procès-verbal</strong>.

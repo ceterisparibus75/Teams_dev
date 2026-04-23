@@ -351,10 +351,17 @@ export async function generateMinutesContent(
   let status = 'success'
   let errorMessage: string | undefined
 
+  console.log(
+    '[Claude] Génération pour "%s" — transcription: %d chars, modèle: %s',
+    subject,
+    (transcription ?? '').length,
+    model
+  )
+
   const callClaude = () =>
     client.messages.create({
       model,
-      max_tokens: 16000,
+      max_tokens: 32000,
       system: systemPrompt,
       tools: [GENERER_PV_TOOL],
       tool_choice: { type: 'tool', name: 'generer_pv' },
@@ -362,11 +369,21 @@ export async function generateMinutesContent(
     })
 
   const extractToolInput = (response: Awaited<ReturnType<typeof callClaude>>) => {
+    if (response.stop_reason === 'max_tokens') {
+      console.warn('[Claude] stop_reason=max_tokens — réponse tronquée, JSON probablement incomplet')
+    }
     const block = response.content.find((b) => b.type === 'tool_use')
-    if (!block || block.type !== 'tool_use') return null
+    if (!block || block.type !== 'tool_use') {
+      console.warn('[Claude] Aucun bloc tool_use dans la réponse (stop_reason=%s)', response.stop_reason)
+      return null
+    }
     const input = block.input as Record<string, unknown>
+    const keyCount = Object.keys(input).length
+    if (keyCount < 2) {
+      console.warn('[Claude] Input vide ou incomplet (%d clé(s)), stop_reason=%s', keyCount, response.stop_reason)
+    }
     // Réponse vide : Claude a appelé l'outil sans arguments
-    return Object.keys(input).length >= 2 ? input : null
+    return keyCount >= 2 ? input : null
   }
 
   try {

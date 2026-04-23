@@ -100,11 +100,17 @@ export async function POST(
       })
       console.log(`[generate/after] ✓ CR généré — meetingId=${meetingId} minutesId=${minutesId}`)
     } catch (error) {
+      const errMsg = error instanceof Error ? error.message : 'Erreur inconnue'
       console.error('[generate/after] Échec génération Claude:', error)
       const fallback = createSkeletonContent(meetingSubject, participants, startDateTime)
+      const fallbackWithError = {
+        ...(fallback as object),
+        _generating: false,
+        _generationError: errMsg,
+      } as Prisma.InputJsonValue
       await prisma.meetingMinutes.update({
         where: { id: minutesId },
-        data: { content: { ...(fallback as object), _generating: false } as Prisma.InputJsonValue },
+        data: { content: fallbackWithError },
       })
     }
   })

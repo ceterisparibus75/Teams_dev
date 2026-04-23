@@ -29,8 +29,10 @@ export async function GET(
   })
 
   if (!minutes) return NextResponse.json({ error: 'Introuvable' }, { status: 404 })
-  const generating = (minutes.content as Record<string, unknown>)?._generating === true
-  return NextResponse.json({ ...minutes, generating })
+  const raw = minutes.content as Record<string, unknown>
+  const generating = raw?._generating === true
+  const generationError = typeof raw?._generationError === 'string' ? raw._generationError : null
+  return NextResponse.json({ ...minutes, generating, generationError })
 }
 
 export async function PATCH(
