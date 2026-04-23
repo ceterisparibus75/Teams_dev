@@ -234,14 +234,14 @@ function TemplatePreview({ form }: { form: TemplateFormData }) {
   const headerReversed = form.enteteAlignement === 'droite'
 
   return (
-    <div className="space-y-2">
-      <p className="text-xs font-medium text-gray-500">Aperçu du document</p>
+    <div className="space-y-3">
+      <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Aperçu du document</p>
       {/* Conteneur grisé simulant la page dans un environnement */}
-      <div className="bg-gray-200 rounded-xl p-3 overflow-hidden">
-        {/* Zone de mise à l'échelle — on expose ~600px du haut de l'A4 */}
+      <div className="bg-gray-100 rounded-xl p-4 overflow-hidden border border-gray-200">
+        {/* Zone de mise à l'échelle */}
         <div
-          className="relative overflow-hidden rounded shadow-lg"
-          style={{ height: 340 }}
+          className="relative overflow-hidden rounded-sm shadow-xl"
+          style={{ height: 500 }}
         >
           <div
             style={{
@@ -377,9 +377,9 @@ export function TemplateEditor({ initial, onSaved, onCancel }: Props) {
   }
 
   return (
-    <div className="grid grid-cols-1 xl:grid-cols-[1fr_480px] gap-6">
+    <div className="grid grid-cols-1 xl:grid-cols-[1fr_480px] gap-6 xl:items-start">
       {/* ── Formulaire ── */}
-      <div className="space-y-4">
+      <div className="flex flex-col gap-4 min-h-[520px]">
         {/* Onglets */}
         <div className="flex gap-1 border-b border-gray-200 overflow-x-auto">
           {TABS.map((t) => (
@@ -396,6 +396,9 @@ export function TemplateEditor({ initial, onSaved, onCancel }: Props) {
             </button>
           ))}
         </div>
+
+        {/* Contenu onglet — flex-1 pour pousser les boutons en bas */}
+        <div className="flex-1">
 
         {/* ── Général ── */}
         {tab === 'general' && (
@@ -653,8 +656,10 @@ export function TemplateEditor({ initial, onSaved, onCancel }: Props) {
           </div>
         )}
 
-        {/* Boutons */}
-        <div className="flex justify-end gap-3 pt-4 border-t border-gray-100">
+        </div>{/* fin flex-1 */}
+
+        {/* Boutons — toujours en bas grâce au flex-col + mt-auto */}
+        <div className="flex justify-end gap-3 pt-4 border-t border-gray-100 mt-auto">
           <Button variant="outline" onClick={onCancel}>Annuler</Button>
           <Button onClick={handleSave} loading={saving}>Enregistrer</Button>
         </div>
