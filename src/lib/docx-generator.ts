@@ -66,9 +66,9 @@ const DEFAULT_TEMPLATE: TemplateConfig = {
   piedPageAlignement: 'centre',
   numeroterPages: true,
   formatNumerotation: 'Page {n} sur {total}',
-  policeCorps: 'Cambria',
+  policeCorps: 'Utsaah',
   taillePoliceCorps: 11,
-  policeTitres: 'Cambria',
+  policeTitres: 'Utsaah',
   taillePoliceTitre1: 14,
   taillePoliceTitre2: 12,
   couleurTitres: '70989C',
@@ -312,15 +312,19 @@ function participantsTableSimple(participants: Participant[], cfg: TemplateConfi
 
 function participantsTableGrouped(pvParticipants: PvContent['participants'], cfg: TemplateConfig): (Paragraph | Table)[] {
   const result: (Paragraph | Table)[] = []
-  const grouped = new Map<string, PvContent['participants']>()
 
-  for (const cat of CATEGORIE_ORDER) {
-    const members = pvParticipants.filter((p) => p.categorie === cat)
-    if (members.length > 0) grouped.set(cat, members)
-  }
+  const presents = pvParticipants.filter((p) => p.presence !== 'Absent')
+  const absents  = pvParticipants.filter((p) => p.presence === 'Absent')
 
   const borders = gridBorders(cfg.couleurBordureTableau)
   const bgColor = cfg.couleurEnteteTableau
+
+  // ── Participants présents groupés par catégorie ─────────────────────────────
+  const grouped = new Map<string, PvContent['participants']>()
+  for (const cat of CATEGORIE_ORDER) {
+    const members = presents.filter((p) => p.categorie === cat)
+    if (members.length > 0) grouped.set(cat, members)
+  }
 
   for (const [cat, members] of grouped) {
     result.push(new Paragraph({
@@ -355,6 +359,32 @@ function participantsTableGrouped(pvParticipants: PvContent['participants'], cfg
     }))
     result.push(empty(80))
   }
+
+  // ── Participants absents ────────────────────────────────────────────────────
+  if (absents.length > 0) {
+    result.push(empty(80))
+    result.push(sectionLabel('Absents excusés'))
+    result.push(empty(40))
+    const absentHeader = new TableRow({
+      tableHeader: true,
+      children: [
+        headerCell('Nom et prénom', bgColor),
+        headerCell('Société / Qualité', bgColor),
+      ],
+    })
+    const absentRows = absents.map((p) => new TableRow({ children: [
+      dataCell(p.civilite_nom),
+      dataCell(p.societe_qualite),
+    ]}))
+    result.push(new Table({
+      width: { size: 100, type: WidthType.PERCENTAGE },
+      columnWidths: [4500, 5500],
+      borders,
+      rows: [absentHeader, ...absentRows],
+    }))
+    result.push(empty(80))
+  }
+
   return result
 }
 

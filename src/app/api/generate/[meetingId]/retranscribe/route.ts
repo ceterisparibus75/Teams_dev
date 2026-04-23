@@ -86,6 +86,9 @@ export async function POST(
   if (!session?.user?.id) return NextResponse.json({ error: 'Non autorisé' }, { status: 401 })
 
   const { meetingId } = await params
+  const body = await req.json().catch(() => ({}))
+  const customPromptText: string | undefined = body.promptText || undefined
+  const customModelName: string | undefined = body.modelName || undefined
 
   const meeting = await prisma.meeting.findFirst({
     where: {
@@ -134,7 +137,7 @@ export async function POST(
       meeting.subject,
       transcriptResult.transcription,
       meeting.participants,
-      { userId: session.user.id, minutesId: existingMinutes.id }
+      { userId: session.user.id, minutesId: existingMinutes.id, promptText: customPromptText, modelName: customModelName }
     )
   } catch (genError) {
     const msg = genError instanceof Error ? genError.message : 'Erreur inconnue'

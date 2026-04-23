@@ -2,12 +2,19 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { toast } from 'sonner'
-import { Download, Send, RefreshCw, CheckCircle } from 'lucide-react'
+import { Download, Send, RefreshCw, CheckCircle, ChevronDown, ChevronUp } from 'lucide-react'
 import { Button, Badge } from '@/components/ui'
 import { SectionEditor } from '@/components/minutes/SectionEditor'
 import { SendModal } from '@/components/minutes/SendModal'
 import { formatDateTime } from '@/lib/utils'
 import type { MinutesContent, TemplateSection } from '@/types'
+
+interface PromptOption {
+  id: string
+  nom: string
+  contenu: string
+  modeleClaude: string
+}
 
 const DEFAULT_SECTIONS: TemplateSection[] = [
   { id: 'summary', label: 'Résumé',               type: 'text',  aiGenerated: true  },
@@ -54,6 +61,13 @@ export default function MinutesDetailPage() {
   const [elapsed, setElapsed] = useState(0)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
+  // Panel de personnalisation IA
+  const [showPromptPanel, setShowPromptPanel] = useState(false)
+  const [prompts, setPrompts] = useState<PromptOption[]>([])
+  const [selectedPromptId, setSelectedPromptId] = useState<string>('')
+  const [customPromptText, setCustomPromptText] = useState<string>('')
+  const [customModel, setCustomModel] = useState<string>('claude-opus-4-7')
+
   useEffect(() => {
     fetch(`/api/minutes/${id}`)
       .then((r) => r.json())
@@ -92,6 +106,15 @@ export default function MinutesDetailPage() {
     setValidating(false)
   }
 
+  // Charge les prompts quand le panel s'ouvre
+  useEffect(() => {
+    if (!showPromptPanel || prompts.length > 0) return
+    fetch('/api/prompts')
+      .then((r) => r.json())
+      .then((list: PromptOption[]) => setPrompts(list))
+      .catch(() => toast.error('Impossible de charger les prompts'))
+  }, [showPromptPanel, prompts.length])
+
   // Autosave every 30s
   useEffect(() => {
     if (!content) return
@@ -109,14 +132,17 @@ export default function MinutesDetailPage() {
     return () => { if (timerRef.current) clearInterval(timerRef.current) }
   }, [regenerating])
 
-  async function handleRegenerate() {
+  async function handleRegenerate(useCustomParams = false) {
     if (!data) return
     setRegenerating(true)
     try {
+      const body: Record<string, string> = {}
+      if (useCustomParams && customPromptText.trim()) body.promptText = customPromptText.trim()
+      if (useCustomParams && customModel) body.modelName = customModel
       const res = await fetch(`/api/generate/${data.meeting.id}/retranscribe`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({}),
+        body: JSON.stringify(body),
       })
       if (!res.ok) {
         const err = (await res.json()) as ApiErrorPayload
@@ -190,16 +216,84 @@ export default function MinutesDetailPage() {
               </span>
             </div>
           ) : (
-            <button
-              onClick={handleRegenerate}
-              className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-blue-600 border border-gray-200 rounded-lg px-3 py-1.5 hover:border-blue-300 transition-colors"
-            >
-              <RefreshCw size={12} />
-              Régénérer le procès-verbal
-            </button>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => handleRegenerate(false)}
+                className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-blue-600 border border-gray-200 rounded-l-lg px-3 py-1.5 hover:border-blue-300 transition-colors"
+              >
+                <RefreshCw size={12} />
+                Régénérer le procès-verbal
+              </button>
+              <button
+                onClick={() => setShowPromptPanel((v) => !v)}
+                title="Personnaliser le prompt IA"
+                className="flex items-center gap-0.5 text-xs text-gray-500 hover:text-blue-600 border border-l-0 border-gray-200 rounded-r-lg px-2 py-1.5 hover:border-blue-300 transition-colors"
+              >
+                {showPromptPanel ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+              </button>
+            </div>
           )}
         </div>
       </div>
+
+      {showPromptPanel && !regenerating && (
+        <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 space-y-3">
+          <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Paramètres IA — régénération</p>
+          {prompts.length > 0 && (
+            <div className="space-y-1">
+              <label className="text-xs text-gray-500">Prompt prédéfini</label>
+              <select
+                value={selectedPromptId}
+                onChange={(e) => {
+                  const p = prompts.find((pr) => pr.id === e.target.value)
+                  setSelectedPromptId(e.target.value)
+                  if (p) {
+                    setCustomPromptText(p.contenu)
+                    setCustomModel(p.modeleClaude)
+                  }
+                }}
+                className="w-full text-sm border border-gray-200 rounded-lg px-3 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-blue-400"
+              >
+                <option value="">— Prompt par défaut —</option>
+                {prompts.map((p) => (
+                  <option key={p.id} value={p.id}>{p.nom}</option>
+                ))}
+              </select>
+            </div>
+          )}
+          <div className="space-y-1">
+            <label className="text-xs text-gray-500">Instructions personnalisées (laisser vide = prompt par défaut)</label>
+            <textarea
+              value={customPromptText}
+              onChange={(e) => setCustomPromptText(e.target.value)}
+              rows={6}
+              placeholder="Coller ou modifier ici les instructions pour Claude…"
+              className="w-full text-xs font-mono border border-gray-200 rounded-lg p-3 bg-white focus:outline-none focus:ring-2 focus:ring-blue-400 resize-y"
+            />
+          </div>
+          <div className="flex items-center gap-4">
+            <div className="space-y-1 flex-1">
+              <label className="text-xs text-gray-500">Modèle Claude</label>
+              <select
+                value={customModel}
+                onChange={(e) => setCustomModel(e.target.value)}
+                className="w-full text-sm border border-gray-200 rounded-lg px-3 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-blue-400"
+              >
+                <option value="claude-opus-4-7">Claude Opus 4.7 (meilleur)</option>
+                <option value="claude-sonnet-4-6">Claude Sonnet 4.6 (rapide)</option>
+                <option value="claude-haiku-4-5-20251001">Claude Haiku 4.5 (très rapide)</option>
+              </select>
+            </div>
+            <button
+              onClick={() => handleRegenerate(true)}
+              className="mt-5 flex items-center gap-1.5 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg px-4 py-2 transition-colors shrink-0"
+            >
+              <RefreshCw size={14} />
+              Régénérer avec ces paramètres
+            </button>
+          </div>
+        </div>
+      )}
 
       <p className="text-sm text-gray-500">
         Participants : {data.meeting.participants.map((p) => p.name).join(', ')}

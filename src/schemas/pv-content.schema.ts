@@ -1,6 +1,6 @@
 import { z } from 'zod'
 
-export const PresenceSchema = z.enum(['Visioconférence', 'Présentiel', 'Téléphonique'])
+export const PresenceSchema = z.enum(['Visioconférence', 'Présentiel', 'Téléphonique', 'Absent'])
 
 export const TypeProcedureSchema = z.enum([
   'Mandat ad hoc',
