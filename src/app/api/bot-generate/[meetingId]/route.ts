@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { generateMinutesContent } from '@/lib/azure-openai'
-import { getAttendanceWarning } from '@/lib/attendance-warning'
-import { getAttendanceLookup } from '@/lib/microsoft-graph'
 
 // Rate limiting in-memory : un appel par meetingId toutes les 60 secondes
 const rateLimitMap = new Map<string, number>()
@@ -52,14 +50,11 @@ export async function POST(
 
   const existingMinutes = await prisma.meetingMinutes.findUnique({ where: { meetingId } })
   const defaultTemplate = await prisma.template.findFirst({ where: { isDefault: true } })
-  const attendanceLookup = await getAttendanceLookup(meeting.organizerId, meeting.joinUrl)
-  const attendanceWarning = getAttendanceWarning(attendanceLookup)
-  if (attendanceWarning) console.warn('[bot-generate] Attendance warning:', attendanceWarning)
   const content = await generateMinutesContent(
     meeting.subject,
     transcript,
     meeting.participants,
-    { meetingDate: meeting.startDateTime ?? undefined, attendanceLookup }
+    { meetingDate: meeting.startDateTime ?? undefined }
   )
 
   if (existingMinutes) {
@@ -74,9 +69,9 @@ export async function POST(
         data: { hasTranscription: true },
       })
       console.log(`[bot-generate] Compte rendu mis à jour avec transcription pour "${meeting.subject}"`)
-      return NextResponse.json({ ok: true, updated: true, attendanceWarning })
+      return NextResponse.json({ ok: true, updated: true })
     }
-    return NextResponse.json({ ok: true, alreadyExists: true, attendanceWarning })
+    return NextResponse.json({ ok: true, alreadyExists: true })
   }
 
   await prisma.meetingMinutes.create({
@@ -90,5 +85,5 @@ export async function POST(
   })
 
   console.log(`[bot-generate] Compte rendu créé pour "${meeting.subject}"`)
-  return NextResponse.json({ ok: true, attendanceWarning })
+  return NextResponse.json({ ok: true })
 }

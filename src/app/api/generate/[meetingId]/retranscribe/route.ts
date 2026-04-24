@@ -3,8 +3,7 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { generateMinutesContent } from '@/lib/azure-openai'
-import { getAttendanceWarning } from '@/lib/attendance-warning'
-import { getAttendanceLookup, getTranscriptionResult } from '@/lib/microsoft-graph'
+import { getTranscriptionResult } from '@/lib/microsoft-graph'
 
 function withDetail(message: string, detail?: string) {
   return detail ? `${message} Détail Graph: ${detail}` : message
@@ -133,22 +132,12 @@ export async function POST(
   })
 
   let content
-  let attendanceWarning
   try {
-    const attendanceLookup = await getAttendanceLookup(session.user.id, meeting.joinUrl)
-    attendanceWarning = getAttendanceWarning(attendanceLookup)
     content = await generateMinutesContent(
       meeting.subject,
       transcriptResult.transcription,
       meeting.participants,
-      {
-        userId: session.user.id,
-        minutesId: existingMinutes.id,
-        promptText: customPromptText,
-        modelName: customModelName,
-        meetingDate: meeting.startDateTime ?? undefined,
-        attendanceLookup,
-      }
+      { userId: session.user.id, minutesId: existingMinutes.id, promptText: customPromptText, modelName: customModelName, meetingDate: meeting.startDateTime ?? undefined }
     )
   } catch (genError) {
     const msg = genError instanceof Error ? genError.message : 'Erreur inconnue'
@@ -164,5 +153,5 @@ export async function POST(
     data: { content: content as unknown as import('@prisma/client').Prisma.InputJsonValue },
   })
 
-  return NextResponse.json({ ok: true, minutesId: existingMinutes.id, attendanceWarning })
+  return NextResponse.json({ ok: true, minutesId: existingMinutes.id })
 }

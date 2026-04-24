@@ -1,9 +1,8 @@
-import { NextRequest, NextResponse, after } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { getRecentMeetings, getTranscription } from '@/lib/microsoft-graph'
-import { extractVttDurationMinutes } from '@/lib/utils'
 
 export async function GET(req: NextRequest) {
   const session = await getServerSession(authOptions)
@@ -40,7 +39,7 @@ export async function GET(req: NextRequest) {
       // La table dossier n'est pas encore disponible — on continue sans auto-association
     }
 
-    // Récupère tous les IDs existants en une seule requête
+    // Récupère tous les IDs existants en une seule requête (évite N+1)
     const existingIds = new Set(
       (await prisma.meeting.findMany({
         where: { id: { in: graphMeetings.map((m) => m.id) } },
@@ -48,53 +47,48 @@ export async function GET(req: NextRequest) {
       })).map((m) => m.id)
     )
 
-    // Traitement des nouvelles réunions avec batch unique pour les membres du cabinet
-    const newGraphMeetings = graphMeetings.filter((gm) => !existingIds.has(gm.id))
+    for (const gm of graphMeetings) {
+      if (existingIds.has(gm.id)) continue
 
-    if (newGraphMeetings.length > 0) {
-      const allEmails = [...new Set(
-        newGraphMeetings.flatMap((gm) => gm.attendees.map((a) => a.emailAddress.address.toLowerCase()))
-      )]
-      const firmMembers = allEmails.length > 0
-        ? await prisma.user.findMany({ where: { email: { in: allEmails } }, select: { id: true, email: true } })
-        : []
-      const emailToUserId = new Map(firmMembers.map((m) => [m.email.toLowerCase(), m.id]))
+      // Cherche un dossier dont la dénomination apparaît dans le sujet de la réunion
+      const subjectLower = gm.subject.toLowerCase()
+      const matchedDossier = dossiers.find((d) =>
+        subjectLower.includes(d.denomination.toLowerCase())
+      )
 
-      for (const gm of newGraphMeetings) {
-        const subjectLower = gm.subject.toLowerCase()
-        const matchedDossier = dossiers.find((d) => subjectLower.includes(d.denomination.toLowerCase()))
-
-        await prisma.meeting.create({
-          data: {
-            id: gm.id,
-            subject: gm.subject,
-            startDateTime: new Date(gm.startDateTime),
-            endDateTime: new Date(gm.endDateTime),
-            organizerId: session.user.id,
-            joinUrl: gm.joinUrl ?? null,
-            dossierId: matchedDossier?.id ?? null,
-            participants: {
-              create: gm.attendees.map((a) => ({
-                name: a.emailAddress.name,
-                email: a.emailAddress.address,
-              })),
-            },
+      await prisma.meeting.create({
+        data: {
+          id: gm.id,
+          subject: gm.subject,
+          startDateTime: new Date(gm.startDateTime),
+          endDateTime: new Date(gm.endDateTime),
+          organizerId: session.user.id,
+          joinUrl: gm.joinUrl ?? null,
+          dossierId: matchedDossier?.id ?? null,
+          participants: {
+            create: gm.attendees.map((a) => ({
+              name: a.emailAddress.name,
+              email: a.emailAddress.address,
+            })),
           },
-        })
+        },
+      })
 
-        const firmMemberIds = gm.attendees
-          .map((a) => emailToUserId.get(a.emailAddress.address.toLowerCase()))
-          .filter((id): id is string => id !== undefined)
-        if (firmMemberIds.length > 0) {
-          await prisma.meetingCollaborator.createMany({
-            data: firmMemberIds.map((userId) => ({ meetingId: gm.id, userId })),
-            skipDuplicates: true,
-          })
-        }
+      // Link firm members who attended (batch au lieu de N upserts séquentiels)
+      const attendeeEmails = gm.attendees.map((a) => a.emailAddress.address.toLowerCase())
+      const firmMembers = await prisma.user.findMany({
+        where: { email: { in: attendeeEmails } },
+        select: { id: true },
+      })
+      if (firmMembers.length > 0) {
+        await prisma.meetingCollaborator.createMany({
+          data: firmMembers.map((m) => ({ meetingId: gm.id, userId: m.id })),
+          skipDuplicates: true,
+        })
       }
     }
 
-    // Réunions visibles par cet utilisateur (organisateur OU collaborateur)
+    // Return meetings visible to this user (organizer OR collaborator)
     const meetings = await prisma.meeting.findMany({
       where: {
         OR: [
@@ -108,7 +102,6 @@ export async function GET(req: NextRequest) {
         startDateTime: true,
         endDateTime: true,
         hasTranscription: true,
-        durationMinutes: true,
         joinUrl: true,
         platform: true,
         botStatus: true,
@@ -120,44 +113,39 @@ export async function GET(req: NextRequest) {
       take: 30,
     })
 
-    // Vérification transcriptions + backfill durationMinutes — en arrière-plan (non bloquant)
-    // Cible : réunions terminées sans transcription détectée, OU avec transcription mais sans durée stockée
+    // Vérifier les transcriptions disponibles pour les réunions terminées sans flag
     const now = new Date()
-    const userId = session.user.id
     const toCheck = meetings
-      .filter((m) => m.joinUrl && new Date(m.endDateTime) < now && (
-        !m.hasTranscription || m.durationMinutes === null
-      ))
-      .slice(0, 3)
+      .filter((m) => !m.hasTranscription && m.joinUrl && new Date(m.endDateTime) < now)
+      .slice(0, 5)
 
+    const updatedIds = new Set<string>()
     if (toCheck.length > 0) {
-      after(async () => {
-        await Promise.all(
-          toCheck.map(async (m) => {
-            try {
-              const transcription = await getTranscription(userId, m.joinUrl!, { subject: m.subject })
-              if (transcription) {
-                const durationMinutes = extractVttDurationMinutes(transcription)
-                await prisma.meeting.update({
-                  where: { id: m.id },
-                  data: {
-                    hasTranscription: true,
-                    ...(durationMinutes !== null && { durationMinutes }),
-                  },
-                })
-              }
-            } catch {
-              // Silencieux — pas de transcription ou erreur Graph
+      await Promise.all(
+        toCheck.map(async (m) => {
+          try {
+            const transcription = await getTranscription(session.user.id, m.joinUrl!, {
+              subject: m.subject,
+            })
+            if (transcription) {
+              await prisma.meeting.update({
+                where: { id: m.id },
+                data: { hasTranscription: true },
+              })
+              updatedIds.add(m.id)
             }
-          })
-        )
-      })
+          } catch {
+            // Silencieux — pas de transcription disponible ou erreur Graph
+          }
+        })
+      )
     }
 
-    // Réponse immédiate — joinUrl et durationMinutes non nécessaires côté client dashboard
+    // Retourner sans joinUrl (non nécessaire côté client) + flags mis à jour
     return NextResponse.json(
-      meetings.map(({ joinUrl: _joinUrl, durationMinutes: _dm, ...m }) => ({
+      meetings.map(({ joinUrl: _joinUrl, ...m }) => ({
         ...m,
+        hasTranscription: updatedIds.has(m.id) ? true : m.hasTranscription,
         minutes: m.minutes ? {
           id: m.minutes.id,
           status: m.minutes.status,

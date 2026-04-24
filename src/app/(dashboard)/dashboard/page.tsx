@@ -66,7 +66,10 @@ export default function DashboardPage() {
   }
 
   useEffect(() => {
-    Promise.all([loadMeetings(), loadOperationsSummary()]).finally(() => setLoading(false))
+    // Meetings : affichage immédiat dès que la réponse arrive
+    loadMeetings().finally(() => setLoading(false))
+    // Operations : se charge en fond, met à jour le résumé quand disponible
+    loadOperationsSummary()
   }, [])
 
   // Polling toutes les 15 s si au moins un CR est en cours de génération

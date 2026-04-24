@@ -1,7 +1,9 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse, after } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
+import { getTranscription } from '@/lib/microsoft-graph'
+import { extractVttDurationMinutes } from '@/lib/utils'
 import type { TypeProcedure, StatutDossier } from '@prisma/client'
 
 export async function GET(
@@ -25,6 +27,7 @@ export async function GET(
           endDateTime: true,
           durationMinutes: true,
           hasTranscription: true,
+          joinUrl: true,
           minutes: { select: { id: true, status: true, content: true } },
         },
       },
@@ -33,7 +36,27 @@ export async function GET(
 
   if (!dossier) return NextResponse.json({ error: 'Introuvable' }, { status: 404 })
 
-  const meetings = dossier.meetings.map((m) => {
+  // Backfill durationMinutes en arrière-plan pour les réunions avec transcription mais sans durée
+  const userId = session.user.id
+  const now = new Date()
+  const toBackfill = dossier.meetings.filter((m) =>
+    m.hasTranscription && m.durationMinutes === null && m.joinUrl && new Date(m.endDateTime) < now
+  )
+  if (toBackfill.length > 0) {
+    after(async () => {
+      await Promise.all(toBackfill.map(async (m) => {
+        try {
+          const transcription = await getTranscription(userId, m.joinUrl!, { subject: m.subject })
+          const durationMinutes = transcription ? extractVttDurationMinutes(transcription) : null
+          if (durationMinutes !== null) {
+            await prisma.meeting.update({ where: { id: m.id }, data: { durationMinutes } })
+          }
+        } catch { /* silencieux */ }
+      }))
+    })
+  }
+
+  const meetings = dossier.meetings.map(({ joinUrl: _, ...m }) => {
     const content = m.minutes?.content as Record<string, unknown> | null
     const summary = typeof content?.summary === 'string' && content.summary.trim()
       ? content.summary.trim().slice(0, 250)

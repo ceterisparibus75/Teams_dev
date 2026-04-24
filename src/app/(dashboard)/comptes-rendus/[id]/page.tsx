@@ -9,7 +9,6 @@ import { SendModal } from '@/components/minutes/SendModal'
 import { formatDateTime } from '@/lib/utils'
 import { getMinutesQualityAlerts, type MinutesQualityAlert } from '@/lib/minutes-quality'
 import type { PvContent } from '@/schemas/pv-content.schema'
-import type { AttendanceWarning } from '@/lib/attendance-warning'
 import type { MinutesContent, TemplateSection } from '@/types'
 
 interface PromptOption {
@@ -69,10 +68,6 @@ interface ApiErrorPayload {
   code?: string
   detail?: string | null
   qualityAlerts?: MinutesQualityAlert[]
-}
-
-interface RegenerateResponse {
-  attendanceWarning?: AttendanceWarning | null
 }
 
 function splitEditableLines(value: string): string[] {
@@ -235,12 +230,6 @@ export default function MinutesDetailPage() {
           description: [err.code, err.detail].filter(Boolean).join(' - ') || undefined,
         })
         return
-      }
-      const payload = (await res.json().catch(() => ({}))) as RegenerateResponse
-      if (payload.attendanceWarning) {
-        toast.warning(payload.attendanceWarning.message, {
-          description: payload.attendanceWarning.detail ?? undefined,
-        })
       }
       toast.success('Compte rendu régénéré')
       router.refresh()

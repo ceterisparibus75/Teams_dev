@@ -1,9 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getAttendanceWarning } from '@/lib/attendance-warning'
-import { getAttendanceLookup, getMeetingsEndedInLastHours, getTranscription } from '@/lib/microsoft-graph'
+import { getMeetingsEndedInLastHours, getTranscription } from '@/lib/microsoft-graph'
 import { generateMinutesContent } from '@/lib/azure-openai'
-import { extractVttDurationMinutes } from '@/lib/utils'
 
 // Cooldown in-memory : protège contre les replay attacks (token intercepté)
 // Vercel Cron tourne toutes les 2h — cooldown 90 min laisse une marge confortable
@@ -91,18 +89,7 @@ export async function GET(req: NextRequest) {
       const transcription = await getTranscription(user.id, gm.joinUrl, {
         subject: gm.subject,
       })
-      const attendanceLookup = await getAttendanceLookup(user.id, gm.joinUrl)
-      const attendanceWarning = getAttendanceWarning(attendanceLookup)
-      if (attendanceWarning) console.warn('[cron/poll] Attendance warning:', attendanceWarning)
-      const content = await generateMinutesContent(
-        gm.subject,
-        transcription,
-        gm.attendees.map((a) => ({
-          name: a.emailAddress.name,
-          email: a.emailAddress.address,
-        })),
-        { userId: user.id, meetingDate: new Date(gm.startDateTime), attendanceLookup }
-      )
+      const content = await generateMinutesContent(gm.subject, transcription)
 
       await prisma.meetingMinutes.create({
         data: {
@@ -114,14 +101,9 @@ export async function GET(req: NextRequest) {
         },
       })
 
-      const durationMinutes = transcription ? extractVttDurationMinutes(transcription) : null
       await prisma.meeting.update({
         where: { id: gm.id },
-        data: {
-          hasTranscription: !!transcription,
-          processedAt: new Date(),
-          ...(durationMinutes !== null && { durationMinutes }),
-        },
+        data: { hasTranscription: !!transcription, processedAt: new Date() },
       })
 
       processed++

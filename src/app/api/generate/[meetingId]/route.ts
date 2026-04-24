@@ -2,10 +2,8 @@ import { NextRequest, NextResponse, after } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
-import { getAttendanceLookup, getTranscription } from '@/lib/microsoft-graph'
+import { getTranscription } from '@/lib/microsoft-graph'
 import { generateMinutesContent, createSkeletonContent } from '@/lib/azure-openai'
-import { getAttendanceWarning } from '@/lib/attendance-warning'
-import { extractVttDurationMinutes } from '@/lib/utils'
 import type { Prisma } from '@prisma/client'
 
 // Plan Pro : 300 s max. Le handler répond en < 1 s (squelette),
@@ -69,8 +67,6 @@ export async function POST(
   const participants = meeting.participants
   const startDateTime = meeting.startDateTime
   const joinUrl = meeting.joinUrl
-  const attendanceLookup = await getAttendanceLookup(userId, joinUrl)
-  const attendanceWarning = getAttendanceWarning(attendanceLookup)
 
   // Tout en arrière-plan : récupération transcription + génération Claude
   after(async () => {
@@ -79,14 +75,9 @@ export async function POST(
 
       const transcription = await getTranscription(userId, joinUrl, { subject: meetingSubject })
 
-      const durationMinutes = transcription ? extractVttDurationMinutes(transcription) : null
       await prisma.meeting.update({
         where: { id: meetingId },
-        data: {
-          hasTranscription: !!transcription,
-          processedAt: new Date(),
-          ...(durationMinutes !== null && { durationMinutes }),
-        },
+        data: { hasTranscription: !!transcription, processedAt: new Date() },
       })
 
       if (!transcription) {
@@ -107,7 +98,7 @@ export async function POST(
         meetingSubject,
         transcription,
         participants,
-        { userId, minutesId, meetingDate: startDateTime ?? undefined, attendanceLookup }
+        { userId, minutesId, meetingDate: startDateTime ?? undefined }
       )
       await prisma.meetingMinutes.update({
         where: { id: minutesId },
@@ -135,5 +126,5 @@ export async function POST(
     }
   })
 
-  return NextResponse.json({ ...savedMinutes, content: skeletonWithFlag, generating: true, attendanceWarning })
+  return NextResponse.json({ ...savedMinutes, content: skeletonWithFlag, generating: true })
 }

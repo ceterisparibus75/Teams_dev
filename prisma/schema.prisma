@@ -99,7 +99,6 @@ model Meeting {
   organizerId      String
   joinUrl          String?
   hasTranscription Boolean               @default(false)
-  durationMinutes  Int?
   processedAt      DateTime?
   platform         MeetingPlatform       @default(TEAMS_INTERNAL)
   externalUrl      String?

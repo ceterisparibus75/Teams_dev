@@ -52,14 +52,13 @@ export async function GET(_req: NextRequest) {
           id: true,
           status: true,
           isGenerating: true,
-          content: true,
           createdAt: true,
           updatedAt: true,
         },
       },
     },
     orderBy: { startDateTime: 'desc' },
-    take: 80,
+    take: 50,
   })
 
   const minutesIds = meetings
@@ -90,12 +89,8 @@ export async function GET(_req: NextRequest) {
   const now = Date.now()
   const rows = meetings.map((meeting) => {
     const minutes = meeting.minutes
-    const content = minutes?.content ?? {}
-    const contentGenerating = readJsonBoolean(content, '_generating')
-    const generationError = formatError(readJsonString(content, '_generationError'))
     const latestAudit = minutes ? latestAuditByMinutes.get(minutes.id) : undefined
-    const auditError = latestAudit?.status === 'error' ? formatError(latestAudit.errorMessage) : null
-    const errorMessage = generationError ?? auditError
+    const errorMessage = latestAudit?.status === 'error' ? formatError(latestAudit.errorMessage) : null
     const generationIsFresh = minutes?.isGenerating === true &&
       now - new Date(minutes.updatedAt).getTime() < 15 * 60 * 1000
 
@@ -104,7 +99,7 @@ export async function GET(_req: NextRequest) {
     else if (new Date(meeting.endDateTime).getTime() < now) transcriptionState = 'missing'
 
     let generationState: GenerationState = 'not_started'
-    if (generationIsFresh || contentGenerating) generationState = 'in_progress'
+    if (generationIsFresh) generationState = 'in_progress'
     else if (errorMessage) generationState = 'failed'
     else if (minutes && !meeting.hasTranscription) generationState = 'draft_without_transcript'
     else if (minutes) generationState = 'done'

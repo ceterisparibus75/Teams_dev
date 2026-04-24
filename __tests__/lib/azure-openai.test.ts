@@ -1,10 +1,4 @@
-import {
-  buildPrompt,
-  parseMinutesContent,
-  createSkeletonContent,
-  pvContentToMinutesContent,
-  normalizeParticipantPresenceFromTranscript,
-} from '@/lib/azure-openai'
+import { buildPrompt, parseMinutesContent, createSkeletonContent, pvContentToMinutesContent } from '@/lib/azure-openai'
 import type { PvContent } from '@/schemas/pv-content.schema'
 
 describe('buildPrompt', () => {
@@ -17,45 +11,6 @@ describe('buildPrompt', () => {
   it('fonctionne sans transcription', () => {
     const prompt = buildPrompt('Réunion équipe', null)
     expect(prompt).toContain('aucune transcription')
-  })
-
-  it('distingue la liste Teams des intervenants détectés dans la transcription', () => {
-    const prompt = buildPrompt(
-      'Réunion créanciers',
-      '[Maxime Langet] Bonjour à tous.\n[Charles Prieur] Merci.',
-      [
-        { name: 'Maxime Langet', email: 'maxime.langet@bl-aj.fr' },
-        { name: 'Jean Absent', email: 'jean@example.com' },
-      ]
-    )
-
-    expect(prompt).toContain("liste Teams d'invitation")
-    expect(prompt).toContain('Intervenants détectés')
-    expect(prompt).toContain('- Maxime Langet')
-    expect(prompt).toContain('- Charles Prieur')
-  })
-
-  it('inclut le rapport de présence Teams quand il est fourni', () => {
-    const prompt = buildPrompt(
-      'Réunion créanciers',
-      '[Maxime Langet] Bonjour à tous.',
-      [{ name: 'Maxime Langet', email: 'maxime.langet@bl-aj.fr' }],
-      new Date('2026-04-23T10:00:00Z'),
-      [
-        {
-          name: 'Jean Présent',
-          email: 'jean@example.com',
-          totalAttendanceInSeconds: 600,
-          intervals: [
-            { joinDateTime: '2026-04-23T10:00:00Z', leaveDateTime: '2026-04-23T10:10:00Z' },
-          ],
-        },
-      ]
-    )
-
-    expect(prompt).toContain('Rapport de présence Teams')
-    expect(prompt).toContain('Jean Présent <jean@example.com>')
-    expect(prompt).toContain('10 min')
   })
 })
 
@@ -244,111 +199,5 @@ describe('pvContentToMinutesContent', () => {
     const result = pvContentToMinutesContent(pv)
     expect(result.notes).toContain('→ Vérifier le montant de la dette')
     expect(result.notes).toContain('→ Confirmer la date du tribunal')
-  })
-})
-
-describe('normalizeParticipantPresenceFromTranscript', () => {
-  it('ne marque pas absent un invité silencieux sans mention explicite d’absence', () => {
-    const pv = buildPvContent({
-      participants: [
-        {
-          civilite_nom: 'Maxime Langet',
-          societe_qualite: 'SELAS BL & Associés — Conciliateur',
-          email: 'maxime.langet@bl-aj.fr',
-          presence: 'Visioconférence',
-          categorie: 'conciliateur',
-        },
-        {
-          civilite_nom: 'Jean Absent',
-          societe_qualite: 'Banque Test',
-          email: 'jean@example.com',
-          presence: 'Visioconférence',
-          categorie: 'partenaire_bancaire',
-        },
-      ],
-    })
-
-    const normalized = normalizeParticipantPresenceFromTranscript(
-      pv,
-      '[Maxime Langet] Bonjour à tous.\n[Charles Prieur] Merci.'
-    )
-
-    expect(normalized.participants[0].presence).toBe('Visioconférence')
-    expect(normalized.participants[1].presence).toBe('Visioconférence')
-  })
-
-  it('marque absent un invité explicitement signalé comme absent', () => {
-    const pv = buildPvContent({
-      participants: [
-        {
-          civilite_nom: 'Jean Absent',
-          societe_qualite: 'Banque Test',
-          email: 'jean@example.com',
-          presence: 'Visioconférence',
-          categorie: 'partenaire_bancaire',
-        },
-      ],
-    })
-
-    const normalized = normalizeParticipantPresenceFromTranscript(
-      pv,
-      '[Maxime Langet] Jean Absent est excusé et ne participera pas à la réunion.'
-    )
-
-    expect(normalized.participants[0].presence).toBe('Absent')
-  })
-
-  it('ne modifie pas les présences si aucun intervenant structuré n’est détecté', () => {
-    const pv = buildPvContent({
-      participants: [
-        {
-          civilite_nom: 'Jean Dupont',
-          societe_qualite: 'Entreprise',
-          presence: 'Visioconférence',
-          categorie: 'debiteur',
-        },
-      ],
-    })
-
-    const normalized = normalizeParticipantPresenceFromTranscript(pv, 'Bonjour sans speaker structuré.')
-
-    expect(normalized.participants[0].presence).toBe('Visioconférence')
-  })
-
-  it('utilise le rapport de présence Teams pour distinguer présents et absents silencieux', () => {
-    const pv = buildPvContent({
-      participants: [
-        {
-          civilite_nom: 'Jean Présent',
-          societe_qualite: 'Banque Test',
-          email: 'jean.present@example.com',
-          presence: 'Visioconférence',
-          categorie: 'partenaire_bancaire',
-        },
-        {
-          civilite_nom: 'Marie Invitée',
-          societe_qualite: 'Banque Test',
-          email: 'marie.invitee@example.com',
-          presence: 'Visioconférence',
-          categorie: 'partenaire_bancaire',
-        },
-      ],
-    })
-
-    const normalized = normalizeParticipantPresenceFromTranscript(
-      pv,
-      '[Maxime Langet] Bonjour à tous.',
-      [
-        {
-          name: 'Jean Présent',
-          email: 'jean.present@example.com',
-          totalAttendanceInSeconds: 900,
-          intervals: [{ joinDateTime: '2026-04-23T10:00:00Z', leaveDateTime: '2026-04-23T10:15:00Z' }],
-        },
-      ]
-    )
-
-    expect(normalized.participants[0].presence).toBe('Visioconférence')
-    expect(normalized.participants[1].presence).toBe('Absent')
   })
 })

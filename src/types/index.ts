@@ -29,25 +29,3 @@ export interface GraphMeeting {
   attendees: Array<{ emailAddress: { name: string; address: string } }>
   joinUrl?: string | null
 }
-
-export interface MeetingAttendanceRecord {
-  name: string
-  email?: string
-  totalAttendanceInSeconds?: number
-  intervals: Array<{ joinDateTime?: string; leaveDateTime?: string }>
-}
-
-export type MeetingAttendanceStatus =
-  | 'not_requested'
-  | 'found'
-  | 'missing_scope'
-  | 'meeting_not_found'
-  | 'report_not_found'
-  | 'records_empty'
-  | 'error'
-
-export interface MeetingAttendanceLookup {
-  status: MeetingAttendanceStatus
-  records: MeetingAttendanceRecord[]
-  detail?: string
-}

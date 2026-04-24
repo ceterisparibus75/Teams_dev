@@ -4,7 +4,6 @@ export const MICROSOFT_GRAPH_SCOPES = [
   'Files.Read.All',
   'OnlineMeetings.Read',
   'OnlineMeetingTranscript.Read.All',
-  'OnlineMeetingArtifact.Read.All',
   'Mail.Send',
 ] as const
 
