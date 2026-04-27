@@ -26,6 +26,9 @@ npx jest --testPathPattern=<nom>  # Un seul fichier de test
 
 # Bot navigateur (réunions externes)
 npm run bot:install  # Installe Chromium pour Playwright (une seule fois)
+
+# Inngest (job queue durable)
+npx inngest-cli@latest dev   # Lance le dashboard local sur http://localhost:8288
 ```
 
 ## Architecture générale
@@ -45,8 +48,19 @@ Connexion Azure AD (NextAuth v4)
 
 ### Deux modes de génération
 
-1. **Manuel** — Utilisateur clique "Générer" → `/api/generate/[meetingId]` → réponse immédiate (squelette) + `after()` pour Claude en arrière-plan
-2. **Automatique (bot)** — Service Express surveille le calendrier Outlook toutes les 60s → détecte réunions terminées → récupère transcription VTT → POST `/api/bot-generate/[meetingId]`
+1. **Manuel** — Utilisateur clique "Générer" → `/api/generate/[meetingId]` crée le squelette en BD et émet l'évènement Inngest `pv/generate.requested` → la fonction `generatePvJob` (`src/inngest/functions/generate-pv.ts`) récupère la transcription, appelle Claude et persiste le résultat avec retry/backoff
+2. **Automatique (cron)** — `/api/cron/poll` (toutes les 2h) liste les réunions terminées et émet un évènement par réunion ; chaque génération est enfilée dans Inngest
+3. **Bot navigateur** — Service Express POST `/api/bot-generate/[meetingId]` avec un transcript déjà capté
+
+### Job queue Inngest
+
+La génération PV (transcription Graph + appel Claude) est exécutée par **Inngest** (`src/inngest/`) plutôt qu'avec `after()`. Avantages : retry exponentiel automatique (3 tentatives), observabilité dashboard, pas de timeout lambda Vercel, concurrence contrôlée (5 jobs en parallèle).
+
+- Endpoint : `/api/inngest` (GET/POST/PUT) exposé via `inngest/next`
+- Évènement typé : `pv/generate.requested` avec `{ meetingId, userId, source, transcript?, promptText?, modelName? }`
+- Steps : `load-meeting → ensure-minutes-row → fetch-transcription → update-meeting-flags → fetch-attendance → claude-generate → persist-success`
+- En dev local : lancer `npx inngest-cli@latest dev` pour avoir le dashboard sur 8288
+- En prod : créer une app sur app.inngest.com, brancher `INNGEST_EVENT_KEY` + `INNGEST_SIGNING_KEY` (via l'intégration Vercel Inngest)
 
 ### Service bot (indépendant)
 
@@ -88,6 +102,7 @@ Connexion Azure AD (NextAuth v4)
 | Route | Méthodes | Auth | Rôle |
 |---|---|---|---|
 | `/api/auth/[...nextauth]` | GET, POST | — | NextAuth (Azure AD) |
+| `/api/inngest` | GET, POST, PUT | Inngest signing key | Endpoint pour la job queue Inngest |
 | `/api/meetings` | GET | JWT | Sync + liste réunions Teams |
 | `/api/minutes` | GET | JWT | Liste tous comptes-rendus accessibles |
 | `/api/minutes/[id]` | GET, PUT, PATCH, DELETE | JWT | CRUD compte-rendu |
@@ -160,6 +175,10 @@ OPENAI_API_KEY        # Whisper (transcription audio bot)
 CRON_SECRET           # Token Bearer pour /api/cron/poll
 BOT_SECRET            # Secret header bot → /api/bot-generate/
 
+# Inngest (job queue durable, prod uniquement — dev marche sans clés)
+INNGEST_EVENT_KEY     # Clé pour émettre les évènements
+INNGEST_SIGNING_KEY   # Vérifie que les requêtes /api/inngest viennent bien d'Inngest
+
 # Bot navigateur (si déployé)
 APP_URL               # URL callback API depuis bot (ex: http://localhost:3000)
 BOT_PORT              # Port Express bot (défaut: 3001)
@@ -196,6 +215,6 @@ BOT_AUDIO_DIR         # Dossier audio temporaire (défaut: /tmp/bot-audio)
 
 1. **Schéma PV** — Toute modification du schéma Zod dans `src/schemas/pv-content.schema.ts` doit être cohérente avec l'outil Claude dans `src/lib/azure-openai.ts`
 2. **Tokens Microsoft** — `microsoft-graph.ts` gère deux types de tokens : app-only (client credentials, pour transcriptions) et délégué (pour calendrier/email utilisateur)
-3. **isGenerating** — Le flag `MeetingMinutes.isGenerating` est mis à `false` dans le `after()` — si le serveur crash pendant la génération, il reste bloqué à `true`
+3. **isGenerating** — Le flag `MeetingMinutes.isGenerating` est désormais piloté par la fonction Inngest `generatePvJob` qui retry automatiquement et écrit le statut final dans tous les cas (success, no_transcription, failure). Côté lecture, `/api/operations` et `/api/minutes/[id]` considèrent un `isGenerating=true` plus vieux que 15 min comme « timed out » et le forcent à false
 4. **Template logo** — Stocké en base64 dans PostgreSQL (`@db.Text`) ; pas de limite de taille imposée — éviter > 2 MB
 5. **Catégorisation BL&Associés** — Détection par domaine email `@bl-aj.fr` uniquement (règle stricte dans le prompt système)

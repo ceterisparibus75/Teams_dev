@@ -1,16 +1,12 @@
-import { NextRequest, NextResponse, after } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
-import { getAttendanceLookup, getTranscription } from '@/lib/microsoft-graph'
-import { generateMinutesContent, createSkeletonContent } from '@/lib/azure-openai'
+import { getAttendanceLookup } from '@/lib/microsoft-graph'
+import { createSkeletonContent } from '@/lib/azure-openai'
 import { getAttendanceWarning } from '@/lib/attendance-warning'
-import { extractVttDurationMinutes } from '@/lib/utils'
 import { toPrismaJson } from '@/lib/minutes-persist'
-
-// Plan Pro : 300 s max. Le handler répond en < 1 s (squelette),
-// le reste du budget est utilisé par after() pour la transcription + Claude.
-export const maxDuration = 300
+import { inngest } from '@/inngest/client'
 
 export async function POST(
   _req: NextRequest,
@@ -37,7 +33,8 @@ export async function POST(
   const existingMinutes = await prisma.meetingMinutes.findUnique({ where: { meetingId } })
   const defaultTemplate = await prisma.template.findFirst({ where: { isDefault: true } })
 
-  // Squelette immédiat — transcription et Claude se font entièrement en arrière-plan
+  // Squelette immédiat — la génération réelle tourne via Inngest (retry, observabilité,
+  // pas de timeout lambda).
   const skeleton = createSkeletonContent(meeting.subject, meeting.participants, meeting.startDateTime)
   const skeletonWithFlag = toPrismaJson({
     ...(skeleton as object),
@@ -45,95 +42,36 @@ export async function POST(
     _generatingStartedAt: new Date().toISOString(),
   })
 
-  let savedMinutes
-  if (existingMinutes) {
-    savedMinutes = await prisma.meetingMinutes.update({
-      where: { meetingId },
-      data: { content: skeletonWithFlag, isGenerating: true },
-    })
-  } else {
-    savedMinutes = await prisma.meetingMinutes.create({
-      data: {
-        meetingId,
-        authorId: userId,
-        templateId: defaultTemplate?.id ?? null,
-        content: skeletonWithFlag,
-        isGenerating: true,
-        status: 'DRAFT',
-      },
-    })
-  }
+  const savedMinutes = existingMinutes
+    ? await prisma.meetingMinutes.update({
+        where: { meetingId },
+        data: { content: skeletonWithFlag, isGenerating: true },
+      })
+    : await prisma.meetingMinutes.create({
+        data: {
+          meetingId,
+          authorId: userId,
+          templateId: defaultTemplate?.id ?? null,
+          content: skeletonWithFlag,
+          isGenerating: true,
+          status: 'DRAFT',
+        },
+      })
 
-  const minutesId = savedMinutes.id
-  const meetingSubject = meeting.subject
-  const participants = meeting.participants
-  const startDateTime = meeting.startDateTime
-  const joinUrl = meeting.joinUrl
-  const attendanceLookup = await getAttendanceLookup(userId, joinUrl)
+  // Attendance lookup en synchrone : c'est rapide (1 appel Graph) et ça permet
+  // d'avertir tout de suite l'utilisateur si le scope manque.
+  const attendanceLookup = await getAttendanceLookup(userId, meeting.joinUrl)
   const attendanceWarning = getAttendanceWarning(attendanceLookup)
 
-  // Tout en arrière-plan : récupération transcription + génération Claude
-  after(async () => {
-    try {
-      console.log(`[generate/after] Démarrage — meetingId=${meetingId}`)
-
-      const transcription = await getTranscription(userId, joinUrl, { subject: meetingSubject })
-
-      const durationMinutes = transcription ? extractVttDurationMinutes(transcription) : null
-      await prisma.meeting.update({
-        where: { id: meetingId },
-        data: {
-          hasTranscription: !!transcription,
-          processedAt: new Date(),
-          ...(durationMinutes !== null && { durationMinutes }),
-        },
-      })
-
-      if (!transcription) {
-        console.log(`[generate/after] Pas de transcription — squelette sauvegardé`)
-        const fallback = createSkeletonContent(meetingSubject, participants, startDateTime)
-        await prisma.meetingMinutes.update({
-          where: { id: minutesId },
-          data: {
-            isGenerating: false,
-            content: toPrismaJson({ ...(fallback as object), _generating: false }),
-          },
-        })
-        return
-      }
-
-      console.log(`[generate/after] Transcription trouvée (${transcription.length} chars) — appel Claude`)
-      const content = await generateMinutesContent(
-        meetingSubject,
-        transcription,
-        participants,
-        { userId, minutesId, meetingDate: startDateTime ?? undefined, attendanceLookup }
-      )
-      await prisma.meetingMinutes.update({
-        where: { id: minutesId },
-        data: {
-          isGenerating: false,
-          content: toPrismaJson({ ...(content as object), _generating: false }),
-        },
-      })
-      console.log(`[generate/after] ✓ CR généré — minutesId=${minutesId}`)
-    } catch (error) {
-      const errMsg = error instanceof Error ? error.message : 'Erreur inconnue'
-      console.error('[generate/after] Échec:', error)
-      const fallback = createSkeletonContent(meetingSubject, participants, startDateTime)
-      await prisma.meetingMinutes.update({
-        where: { id: minutesId },
-        data: {
-          isGenerating: false,
-          content: toPrismaJson({
-            ...(fallback as object),
-            _generating: false,
-            _generationError: errMsg,
-          }),
-        },
-      })
-    }
+  await inngest.send({
+    name: 'pv/generate.requested',
+    data: { meetingId, userId, source: 'manual' },
   })
 
-  return NextResponse.json({ ...savedMinutes, content: skeletonWithFlag, generating: true, attendanceWarning })
+  return NextResponse.json({
+    ...savedMinutes,
+    content: skeletonWithFlag,
+    generating: true,
+    attendanceWarning,
+  })
 }

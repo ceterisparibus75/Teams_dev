@@ -1,11 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getAttendanceWarning } from '@/lib/attendance-warning'
-import { getAttendanceLookup, getMeetingsEndedInLastHours, getTranscription } from '@/lib/microsoft-graph'
-import { generateMinutesContent } from '@/lib/azure-openai'
-import { extractVttDurationMinutes } from '@/lib/utils'
+import { getMeetingsEndedInLastHours } from '@/lib/microsoft-graph'
 import { safeBearerEqual } from '@/lib/secrets'
-import { toPrismaJson } from '@/lib/minutes-persist'
+import { inngest } from '@/inngest/client'
 
 // Cooldown persisté en BD — survit aux cold starts lambda et aux redémarrages.
 // Vercel Cron tourne toutes les 2h — cooldown 90 min laisse une marge confortable.
@@ -32,7 +29,9 @@ export async function GET(req: NextRequest) {
     select: { id: true, email: true },
   })
 
-  let processed = 0
+  // Évènements à dispatcher en batch — un par réunion à générer.
+  const events: { name: 'pv/generate.requested'; data: { meetingId: string; userId: string; source: 'cron' } }[] = []
+  let dispatched = 0
 
   for (const user of usersWithToken) {
     const meetings = await getMeetingsEndedInLastHours(user.id, 2)
@@ -78,8 +77,10 @@ export async function GET(req: NextRequest) {
 
       const existingMinutes = await prisma.meetingMinutes.findUnique({
         where: { meetingId: gm.id },
+        select: { id: true },
       })
       if (existingMinutes) {
+        // Déjà un PV : on marque la réunion traitée et on n'enfile pas de job.
         await prisma.meeting.update({
           where: { id: gm.id },
           data: { processedAt: new Date() },
@@ -87,47 +88,16 @@ export async function GET(req: NextRequest) {
         continue
       }
 
-      const defaultTemplate = await prisma.template.findFirst({ where: { isDefault: true } })
-
-      // Transcription in memory only — never persisted (RGPD)
-      const transcription = await getTranscription(user.id, gm.joinUrl, {
-        subject: gm.subject,
+      events.push({
+        name: 'pv/generate.requested',
+        data: { meetingId: gm.id, userId: user.id, source: 'cron' },
       })
-      const attendanceLookup = await getAttendanceLookup(user.id, gm.joinUrl)
-      const attendanceWarning = getAttendanceWarning(attendanceLookup)
-      if (attendanceWarning) console.warn('[cron/poll] Attendance warning:', attendanceWarning)
-      const content = await generateMinutesContent(
-        gm.subject,
-        transcription,
-        gm.attendees.map((a) => ({
-          name: a.emailAddress.name,
-          email: a.emailAddress.address,
-        })),
-        { userId: user.id, meetingDate: new Date(gm.startDateTime), attendanceLookup }
-      )
-
-      await prisma.meetingMinutes.create({
-        data: {
-          meetingId: gm.id,
-          authorId: user.id,
-          templateId: defaultTemplate?.id ?? null,
-          content: toPrismaJson(content as object),
-          status: 'DRAFT',
-        },
-      })
-
-      const durationMinutes = transcription ? extractVttDurationMinutes(transcription) : null
-      await prisma.meeting.update({
-        where: { id: gm.id },
-        data: {
-          hasTranscription: !!transcription,
-          processedAt: new Date(),
-          ...(durationMinutes !== null && { durationMinutes }),
-        },
-      })
-
-      processed++
+      dispatched++
     }
+  }
+
+  if (events.length > 0) {
+    await inngest.send(events)
   }
 
   // Marquer la fin d'une exécution réussie (démarre le cooldown)
@@ -136,5 +106,5 @@ export async function GET(req: NextRequest) {
     create: { job: CRON_JOB_NAME, lastRunAt: new Date(), lastStatus: 'ok' },
     update: { lastRunAt: new Date(), lastStatus: 'ok' },
   })
-  return NextResponse.json({ processed, users: usersWithToken.length })
+  return NextResponse.json({ dispatched, users: usersWithToken.length })
 }
