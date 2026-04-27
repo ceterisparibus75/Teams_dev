@@ -16,9 +16,11 @@ dotenv.config({ path: path.resolve(process.cwd(), '.env.local') })
 import express from 'express'
 import type { Request, Response } from 'express'
 import { PrismaClient } from '@prisma/client'
+import { logger } from '@/lib/logger'
 import { startWatcher } from './watcher'
 
 const PORT = Number(process.env.BOT_PORT ?? 3001)
+const log = logger.child({ service: 'bot' })
 
 export const app = express()
 app.use(express.json())
@@ -56,15 +58,15 @@ export async function triggerGeneration(
         where: { id: meetingDbId },
         data: { hasTranscription: !!transcript, processedAt: new Date() },
       })
-      console.log(`[bot] Compte rendu généré pour ${meetingDbId}`)
+      log.info({ meetingId: meetingDbId }, 'Compte rendu généré')
       botStats.meetingsGenerated++
       return true
     }
 
-    console.error('[bot] Erreur génération:', await res.text())
+    log.error({ status: res.status, body: await res.text() }, 'Erreur génération')
     return false
   } catch (err) {
-    console.error('[bot] triggerGeneration error:', err)
+    log.error({ err, meetingId: meetingDbId }, 'triggerGeneration error')
     return false
   }
 }
@@ -87,12 +89,12 @@ app.get('/health', (_req: Request, res: Response) => {
 // ─── Gestionnaires d'erreurs non interceptées ────────────────────────────────
 
 process.on('uncaughtException', (err) => {
-  console.error('[bot] ERREUR NON INTERCEPTÉE:', err)
+  log.fatal({ err }, 'uncaughtException')
   botStats.errorCount++
 })
 
 process.on('unhandledRejection', (reason) => {
-  console.error('[bot] PROMESSE REJETÉE NON GÉRÉE:', reason)
+  log.fatal({ reason }, 'unhandledRejection')
   botStats.errorCount++
 })
 
@@ -100,9 +102,12 @@ process.on('unhandledRejection', (reason) => {
 
 setInterval(() => {
   const uptimeSeconds = Math.floor((Date.now() - new Date(botStats.startedAt).getTime()) / 1000)
-  console.log(
-    `[bot] ♥ heartbeat — uptime: ${uptimeSeconds}s | ticks: ${botStats.tickCount} | erreurs: ${botStats.errorCount} | réunions: ${botStats.meetingsGenerated}`
-  )
+  log.info({
+    uptimeSeconds,
+    tickCount: botStats.tickCount,
+    errorCount: botStats.errorCount,
+    meetingsGenerated: botStats.meetingsGenerated,
+  }, 'heartbeat')
 }, 5 * 60 * 1000)
 
 // ─── Démarrage ────────────────────────────────────────────────────────────────
@@ -110,7 +115,5 @@ setInterval(() => {
 startWatcher()
 
 app.listen(PORT, () => {
-  console.log(`\n[bot] ✓ Service démarré sur le port ${PORT}`)
-  console.log(`[bot] ✓ Mode transcription Graph API (ngrok non requis)`)
-  console.log(`[bot] ✓ Surveillance des réunions active (vérification toutes les 60s)\n`)
+  log.info({ port: PORT, mode: 'graph-transcription' }, 'Service bot démarré')
 })

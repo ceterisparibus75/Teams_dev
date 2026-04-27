@@ -21,8 +21,11 @@ import { spawn, type ChildProcess } from 'child_process'
 import * as fs from 'fs'
 import * as path from 'path'
 import type { MeetingPlatform } from '@prisma/client'
+import { logger } from '@/lib/logger'
 import { prisma, triggerGeneration } from './index'
 import { transcribeAudio } from './transcriber'
+
+const log = logger.child({ service: 'bot', component: 'browser-bot' })
 
 export interface MeetingTarget {
   id: string
@@ -57,7 +60,7 @@ function startAudioRecording(outputPath: string): ChildProcess {
   })
 
   proc.stderr?.on('data', () => {}) // suppress ffmpeg verbose output
-  proc.on('error', (err) => console.error('[bot-audio] ffmpeg error:', err))
+  proc.on('error', (err) => log.error({ err, scope: 'ffmpeg' }, 'ffmpeg error'))
   return proc
 }
 
@@ -114,7 +117,7 @@ async function joinTeamsExternal(page: Page, url: string): Promise<void> {
   await page.waitForSelector(
     '[data-tid="roster-panel"], [data-tid="calling-roster-section"], .ts-calling-screen',
     { timeout: 60_000 }
-  ).catch(() => console.warn('[bot] Teams: meeting UI not detected within 60s'))
+  ).catch(() => log.warn({ platform: 'TEAMS' }, 'meeting UI not detected within 60s'))
 }
 
 async function joinZoom(page: Page, url: string): Promise<void> {
@@ -140,7 +143,7 @@ async function joinZoom(page: Page, url: string): Promise<void> {
   // Wait for meeting room
   await page.waitForSelector('.meeting-app, .meeting-client, #wc-container-right', {
     timeout: 60_000,
-  }).catch(() => console.warn('[bot] Zoom: meeting UI not detected within 60s'))
+  }).catch(() => log.warn({ platform: 'ZOOM' }, 'meeting UI not detected within 60s'))
 }
 
 async function joinGoogleMeet(page: Page, url: string): Promise<void> {
@@ -163,7 +166,7 @@ async function joinGoogleMeet(page: Page, url: string): Promise<void> {
   // Wait for call UI
   await page.waitForSelector('[data-call-ended], [data-meeting-title], .crqnQb', {
     timeout: 60_000,
-  }).catch(() => console.warn('[bot] Google Meet: meeting UI not detected within 60s'))
+  }).catch(() => log.warn({ platform: 'GOOGLE_MEET' }, 'meeting UI not detected within 60s'))
 }
 
 // ─── Meeting end detection ────────────────────────────────────────────────────
@@ -264,13 +267,13 @@ export async function joinMeeting(meeting: MeetingTarget): Promise<void> {
         data: { botStatus: 'IN_MEETING' },
       })
 
-      console.log(`[bot] "${meeting.subject}" — bot en réunion, enregistrement en cours`)
+      log.info({ meetingId: meeting.id, subject: meeting.subject }, 'Bot en réunion — enregistrement en cours')
 
       await waitForMeetingEnd(page, meeting.endDateTime)
 
-      console.log(`[bot] "${meeting.subject}" — réunion terminée, arrêt de l'enregistrement`)
+      log.info({ meetingId: meeting.id, subject: meeting.subject }, 'Réunion terminée — arrêt de l\'enregistrement')
     } catch (err) {
-      console.error(`[bot] Erreur pendant la réunion "${meeting.subject}":`, err)
+      log.error({ err, meetingId: meeting.id, subject: meeting.subject }, 'Erreur pendant la réunion')
       await prisma.meeting.update({
         where: { id: meeting.id },
         data: { botStatus: 'FAILED' },
@@ -289,7 +292,10 @@ export async function joinMeeting(meeting: MeetingTarget): Promise<void> {
       })
 
       const transcript = await transcribeAudio(audioFile)
-      console.log(`[bot] "${meeting.subject}" — transcription : ${transcript ? transcript.split(' ').length + ' mots' : 'échec'}`)
+      log.info(
+        { meetingId: meeting.id, subject: meeting.subject, words: transcript?.split(' ').length ?? 0, success: !!transcript },
+        'Transcription terminée',
+      )
 
       const generated = await triggerGeneration(meeting.id, transcript)
 
@@ -298,7 +304,7 @@ export async function joinMeeting(meeting: MeetingTarget): Promise<void> {
         data: { botStatus: generated ? 'DONE' : 'FAILED' },
       })
     } catch (err) {
-      console.error(`[bot] Erreur transcription/génération pour "${meeting.subject}":`, err)
+      log.error({ err, meetingId: meeting.id, subject: meeting.subject }, 'Erreur transcription/génération')
       await prisma.meeting.update({
         where: { id: meeting.id },
         data: { botStatus: 'FAILED' },

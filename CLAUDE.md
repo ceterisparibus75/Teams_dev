@@ -87,7 +87,7 @@ La génération PV (transcription Graph + appel Claude) est exécutée par **Inn
 
 ### Services clés dans `src/lib/`
 
-- **`auth.ts`** — Configuration NextAuth + Azure AD ; callbacks `jwt()` (upsert user, stocke tokens) et `session()` (enrichit session) ; refresh token automatique
+- **`auth.ts`** — Configuration NextAuth + Azure AD ; callbacks `jwt()` (upsert user, stocke tokens chiffrés) et `session()` (enrichit session) ; refresh token automatique
 - **`microsoft-graph.ts`** — Token app-only (client credentials MSAL), token délégué (refresh), récupération réunions Outlook, transcription VTT Teams, envoi email Graph
 - **`claude-generator.ts`** — Génération PV via Claude Opus (`claude-opus-4-7`) avec `tool_use` ("generer_pv") ; prompts calibrés procédures judiciaires BL&Associés ; validation Zod ; audit log en BD
 - **`docx-generator.ts`** — Export Word avec lib `docx` ; personnalisation via Template (logo base64, polices, couleurs, marges)
@@ -95,23 +95,32 @@ La génération PV (transcription Graph + appel Claude) est exécutée par **Inn
 - **`openai-transcription.ts`** — Transcription audio via OpenAI Whisper (whisper-1, fr, max 25 MB)
 - **`microsoft-scopes.ts`** — Constante des scopes OAuth Graph requis
 - **`prisma.ts`** — Singleton client Prisma (évite reconnexion en hot-reload)
-- **`utils.ts`** — `cn()` (Tailwind merge), `formatDate()`, `formatDateTime()`, `slugify()`
+- **`utils.ts`** — `cn()` (Tailwind merge), `formatDate()`, `formatDateTime()`, `slugify()`, `extractVttDurationMinutes()`
+- **`logger.ts`** — Logger pino structuré ; redaction automatique OID/TID/emails/tokens/cookies en JSON
+- **`secrets.ts`** — `safeEqual()` / `safeBearerEqual()` timing-safe pour les secrets (BOT_SECRET, CRON_SECRET)
+- **`rate-limit.ts`** — Rate limit fenêtre fixe in-memory par bucket (`generate-pv`, `retranscribe-pv`)
+- **`minutes-persist.ts`** — `MinutesPatchSchema` Zod pour PATCH /api/minutes/[id] + helper `toPrismaJson()`
+- **`attendance-warning.ts`** — Mapping statuts présence Teams → message UI
+- **`crypto.ts`** — Chiffrement AES-256-GCM des tokens Microsoft (préfixe `enc:`, migration transparente)
+- **`swr.ts`** — Fetcher SWR + `FetchError` typé (utilisé côté UI pour data-fetching)
 
 ### Routes API complètes
 
 | Route | Méthodes | Auth | Rôle |
 |---|---|---|---|
 | `/api/auth/[...nextauth]` | GET, POST | — | NextAuth (Azure AD) |
+| `/api/health` | GET | — | Health check (DB ping) — pour Vercel uptime / monitoring externe |
 | `/api/inngest` | GET, POST, PUT | Inngest signing key | Endpoint pour la job queue Inngest |
 | `/api/meetings` | GET | JWT | Sync + liste réunions Teams |
 | `/api/minutes` | GET | JWT | Liste tous comptes-rendus accessibles |
-| `/api/minutes/[id]` | GET, PUT, PATCH, DELETE | JWT | CRUD compte-rendu |
-| `/api/generate/[meetingId]` | POST | JWT | Génère PV (immédiat + after) |
-| `/api/generate/[meetingId]/retranscribe` | POST | JWT | Régénère avec prompt choisi |
-| `/api/bot-generate/[meetingId]` | POST | BOT_SECRET | Route appelée par le bot |
+| `/api/minutes/[id]` | GET, PATCH | JWT | Lecture / édition (Zod strict) compte-rendu |
+| `/api/generate/[meetingId]` | POST | JWT | Crée squelette + dispatch Inngest (rate limit 10/5min) |
+| `/api/generate/[meetingId]/retranscribe` | POST | JWT | Valide transcript sync + dispatch Claude via Inngest (rate limit 5/5min) |
+| `/api/bot-generate/[meetingId]` | POST | BOT_SECRET | Route appelée par le bot (rate limit 1/60s par meetingId) |
 | `/api/export/[minutesId]` | GET | JWT | Télécharge DOCX |
-| `/api/send/[minutesId]` | POST | JWT | Envoie email + DOCX |
-| `/api/cron/poll` | GET | CRON_SECRET | Polling réunions terminées (toutes 2h) |
+| `/api/send/[minutesId]` | POST | JWT | Envoie email + DOCX (Zod recipients) |
+| `/api/operations` | GET | JWT | Vue consolidée traitements (transcription/Claude/échecs) |
+| `/api/cron/poll` | GET | CRON_SECRET | Polling réunions terminées (toutes 2h) — dispatch Inngest |
 | `/api/dossiers` | GET, POST | JWT | Liste + création dossiers juridiques |
 | `/api/dossiers/[id]` | GET, PUT, DELETE | JWT | CRUD dossier |
 | `/api/dossiers/[id]/meetings` | GET | JWT | Réunions d'un dossier |
@@ -123,8 +132,9 @@ La génération PV (transcription Graph + appel Claude) est exécutée par **Inn
 
 **Authentification :**
 - Routes utilisateur : `getServerSession(authOptions)` → `401` si absent
-- Bot : header `x-bot-secret === process.env.BOT_SECRET`
-- Cron : header `Authorization: Bearer ${CRON_SECRET}`
+- Bot : header `x-bot-secret` comparé en temps constant via `safeEqual()`
+- Cron : header `Authorization: Bearer ${CRON_SECRET}` comparé via `safeBearerEqual()`
+- Inngest : signature signing key vérifiée par le SDK officiel
 
 ### Modèles de données (Prisma / PostgreSQL)
 
@@ -146,6 +156,8 @@ La génération PV (transcription Graph + appel Claude) est exécutée par **Inn
 - `Template` — Gabarits DOCX (logo base64 @db.Text, polices, couleurs hex, marges cm)
 - `Prompt` — Prompts Claude personnalisés (contenu, modeleClaude, typeDocument)
 - `GenerationAuditLog` — Audit des appels Claude (tokens, durée, hash transcription)
+- `MinutesEditLog` — Snapshots immuables du contenu PV à chaque édition (rétention 5 ans, purge cron Inngest)
+- `CronRun` — État persistant des jobs cron (cooldown survivant aux cold starts Vercel)
 
 ### Authentification
 

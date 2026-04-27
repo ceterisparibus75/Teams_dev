@@ -24,6 +24,10 @@ export const generatePvJob = inngest.createFunction(
     triggers: [generatePvRequested],
     retries: 3,
     concurrency: { limit: 5 },
+    // Déduplique sur (meetingId, source) sur 5 minutes : si l'utilisateur
+    // double-clique "Régénérer" ou si le cron émet le même event 2 fois,
+    // un seul run Claude sera exécuté.
+    idempotency: 'event.data.meetingId + "-" + event.data.source',
   },
   async ({ event, step }) => {
     const { meetingId, userId, source, transcript: providedTranscript, promptText, modelName } =

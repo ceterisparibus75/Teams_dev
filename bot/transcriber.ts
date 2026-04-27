@@ -7,18 +7,20 @@
  */
 
 import * as fs from 'fs'
+import { logger } from '@/lib/logger'
 
+const log = logger.child({ service: 'bot', component: 'transcriber' })
 const MAX_FILE_SIZE_BYTES = 25 * 1024 * 1024 // Whisper API limit: 25 MB
 
 export async function transcribeAudio(audioFilePath: string): Promise<string | null> {
   try {
     const stat = fs.statSync(audioFilePath)
     if (stat.size === 0) {
-      console.warn('[transcriber] Fichier audio vide — aucune transcription')
+      log.warn('Fichier audio vide — aucune transcription')
       return null
     }
     if (stat.size > MAX_FILE_SIZE_BYTES) {
-      console.warn(`[transcriber] Fichier trop volumineux (${Math.round(stat.size / 1024 / 1024)} MB > 25 MB)`)
+      log.warn({ sizeMb: Math.round(stat.size / 1024 / 1024) }, 'Fichier trop volumineux (> 25 MB)')
       return null
     }
 
@@ -42,14 +44,14 @@ export async function transcribeAudio(audioFilePath: string): Promise<string | n
 
     if (!res.ok) {
       const error = await res.text()
-      console.error('[transcriber] Erreur Whisper API:', error)
+      log.error({ status: res.status, body: error }, 'Erreur Whisper API')
       return null
     }
 
     const text = await res.text()
     return text.trim() || null
   } catch (err) {
-    console.error('[transcriber] Erreur transcription:', err)
+    log.error({ err }, 'Erreur transcription')
     return null
   }
 }

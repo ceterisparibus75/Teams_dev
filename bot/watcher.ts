@@ -14,9 +14,11 @@
 import { Client } from '@microsoft/microsoft-graph-client'
 import { ConfidentialClientApplication } from '@azure/msal-node'
 import type { MeetingPlatform } from '@prisma/client'
+import { logger } from '@/lib/logger'
 import { prisma, triggerGeneration, botStats } from './index'
 import { joinMeeting } from './browser-bot'
 
+const log = logger.child({ service: 'bot', component: 'watcher' })
 const processingMeetings = new Set<string>()
 
 // ─── Token applicatif (client credentials) ────────────────────────────────────
@@ -35,7 +37,7 @@ async function getAppToken(): Promise<string | null> {
     })
     return result?.accessToken ?? null
   } catch (err) {
-    console.error('[bot] Erreur token applicatif:', err)
+    log.error({ err }, 'Erreur token applicatif')
     return null
   }
 }
@@ -113,7 +115,7 @@ async function fetchTranscript(
 ): Promise<string | null> {
   const token = await getAppToken()
   if (!token) {
-    console.warn('[bot] Token applicatif indisponible')
+    log.warn('Token applicatif indisponible')
     return null
   }
 
@@ -149,10 +151,10 @@ async function fetchTranscript(
     const parsed = parseVttTranscript(vttContent)
     if (!parsed) return null
 
-    console.log(`[bot] Transcription Graph récupérée : ${parsed.split('\n').length} lignes`)
+    log.info({ lines: parsed.split('\n').length }, 'Transcription Graph récupérée')
     return parsed
   } catch (err) {
-    console.error('[bot] Erreur récupération transcription Graph:', err)
+    log.error({ err }, 'Erreur récupération transcription Graph')
     return null
   }
 }
@@ -277,7 +279,7 @@ async function syncCalendarMeetings(): Promise<void> {
         })
       }
     } catch (err) {
-      console.error('[bot] Erreur sync calendrier:', err)
+      log.error({ err, userId: user.id }, 'Erreur sync calendrier')
     }
   }
 }
@@ -312,7 +314,7 @@ async function scheduleAndRunBots(): Promise<void> {
       continue
     }
 
-    console.log(`[bot] Lancement bot pour "${meeting.subject}" (${meeting.platform}) — ${meetingUrl}`)
+    log.info({ meetingId: meeting.id, subject: meeting.subject, platform: meeting.platform }, 'Lancement bot navigateur')
 
     // Run in background — joinMeeting handles its own status updates and generation trigger
     joinMeeting({
@@ -322,7 +324,7 @@ async function scheduleAndRunBots(): Promise<void> {
       url: meetingUrl,
       endDateTime: meeting.endDateTime,
     }).catch((err) => {
-      console.error(`[bot] Erreur joinMeeting pour ${meeting.id}:`, err)
+      log.error({ err, meetingId: meeting.id }, 'Erreur joinMeeting')
       prisma.meeting.update({
         where: { id: meeting.id },
         data: { botStatus: 'FAILED' },
@@ -356,7 +358,7 @@ async function processEndedMeetings(): Promise<void> {
     processingMeetings.add(meeting.id)
 
     try {
-      console.log(`[bot] Réunion Teams terminée : "${meeting.subject}" — récupération transcription…`)
+      log.info({ meetingId: meeting.id, subject: meeting.subject }, 'Réunion Teams terminée — récupération transcription')
 
       const transcript =
         meeting.organizer.microsoftId && meeting.joinUrl
@@ -370,14 +372,16 @@ async function processEndedMeetings(): Promise<void> {
 
       const retryDeadline = new Date(meeting.endDateTime.getTime() + TRANSCRIPT_RETRY_WINDOW_MS)
       if (retryDeadline > now) {
-        console.log(
-          `[bot] Transcription indisponible pour "${meeting.subject}" — nouvelle tentative jusqu'à ${retryDeadline.toISOString()}`
+        log.info(
+          { meetingId: meeting.id, subject: meeting.subject, retryDeadline: retryDeadline.toISOString() },
+          'Transcription indisponible — nouvelle tentative programmée',
         )
         continue
       }
 
-      console.warn(
-        `[bot] Transcription introuvable après attente pour "${meeting.subject}" — génération sans transcription`
+      log.warn(
+        { meetingId: meeting.id, subject: meeting.subject },
+        'Transcription introuvable après attente — génération sans transcription',
       )
       await triggerGeneration(meeting.id, null)
     } finally {
@@ -389,7 +393,7 @@ async function processEndedMeetings(): Promise<void> {
 // ─── Démarrage ────────────────────────────────────────────────────────────────
 
 export function startWatcher(): void {
-  console.log('[bot] Watcher démarré — vérification toutes les 60 secondes')
+  log.info('Watcher démarré — vérification toutes les 60 secondes')
 
   async function tick() {
     await syncCalendarMeetings()
@@ -405,7 +409,7 @@ export function startWatcher(): void {
       botStats.lastTickAt = new Date().toISOString()
       botStats.tickCount++
     } catch (err) {
-      console.error('[bot] Erreur tick watcher:', err)
+      log.error({ err }, 'Erreur tick watcher')
       botStats.errorCount++
     }
     setTimeout(scheduleTick, 60_000)
