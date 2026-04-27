@@ -925,17 +925,9 @@ export async function getTranscriptionResult(
     return { ok: false, reason: 'graph_error', detail: failedTokenResult.detail }
   }
 
-  if (!tokenHasTranscriptScope(tokenResult.accessToken)) {
-    return {
-      ok: false,
-      reason: 'permission_denied',
-      detail: mergeDebug(
-        'Le token delegue ne contient pas OnlineMeetingTranscript.Read.All.',
-        tokenResult.debug
-      ),
-    }
-  }
-
+  const tokenClaims = decodeAccessTokenClaims(tokenResult.accessToken)
+  const tokenOid = tokenClaims?.oid
+  const hasTranscriptScope = tokenHasTranscriptScope(tokenResult.accessToken)
   const canSearchFiles = tokenHasFileReadScope(tokenResult.accessToken)
   const tryFileFallback = async (detail: string | undefined): Promise<TranscriptionResult | null> => {
     const subject = options?.subject?.trim()
@@ -981,10 +973,51 @@ export async function getTranscriptionResult(
     }
   }
 
+  const tryAppOnlyTranscriptFallback = async (): Promise<string | null> => {
+    if (!tokenOid) return null
+
+    try {
+      const onlineMeetingId = await resolveOnlineMeetingId(
+        tokenResult.accessToken,
+        joinUrl,
+        tokenOid
+      )
+      if (!onlineMeetingId) return null
+
+      return await fetchTranscriptWithAppToken(tokenOid, onlineMeetingId)
+    } catch {
+      return null
+    }
+  }
+
+  if (!hasTranscriptScope) {
+    const appTranscript = await tryAppOnlyTranscriptFallback()
+    if (appTranscript) {
+      return { ok: true, transcription: appTranscript }
+    }
+
+    const fallbackResult = canSearchFiles
+      ? await tryFileFallback(
+          mergeDebug(
+            'Le token delegue ne contient pas OnlineMeetingTranscript.Read.All.',
+            tokenResult.debug
+          )
+        )
+      : null
+    if (fallbackResult) return fallbackResult
+
+    return {
+      ok: false,
+      reason: 'permission_denied',
+      detail: mergeDebug(
+        'Le token delegue ne contient pas OnlineMeetingTranscript.Read.All.',
+        tokenResult.debug
+      ),
+    }
+  }
+
   try {
     const escapedJoinUrl = escapeODataString(joinUrl)
-    const tokenClaims = decodeAccessTokenClaims(tokenResult.accessToken)
-    const tokenOid = tokenClaims?.oid
     const meetingLookup = new URLSearchParams({
       '$filter': `JoinWebUrl eq '${escapedJoinUrl}'`,
     })

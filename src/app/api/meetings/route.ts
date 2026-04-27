@@ -2,8 +2,8 @@ import { NextRequest, NextResponse, after } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
-import { getRecentMeetings, getTranscription } from '@/lib/microsoft-graph'
-import { extractVttDurationMinutes } from '@/lib/utils'
+import { getRecentMeetings } from '@/lib/microsoft-graph'
+import { refreshMeetingsTranscriptionMetadata } from '@/lib/meeting-transcription-sync'
 
 export async function GET(req: NextRequest) {
   const session = await getServerSession(authOptions)
@@ -120,37 +120,45 @@ export async function GET(req: NextRequest) {
       take: 30,
     })
 
-    // Vérification transcriptions + backfill durationMinutes — en arrière-plan (non bloquant)
-    // Cible : réunions terminées sans transcription détectée, OU avec transcription mais sans durée stockée
+    // Vérification globale des transcriptions en arrière-plan.
+    // On ne se limite plus aux 3 premières réunions affichées : on rattrape
+    // tout l'historique visible de l'utilisateur pour auto-corriger les faux
+    // "Sans transcription" laissés par d'anciens échecs Graph.
     const now = new Date()
     const userId = session.user.id
-    const toCheck = meetings
-      .filter((m) => m.joinUrl && new Date(m.endDateTime) < now && (
-        !m.hasTranscription || m.durationMinutes === null
-      ))
-      .slice(0, 3)
+    const toCheck = await prisma.meeting.findMany({
+      where: {
+        joinUrl: { not: null },
+        endDateTime: { lt: now },
+        AND: [
+          {
+            OR: [
+              { organizerId: userId },
+              { collaborators: { some: { userId } } },
+            ],
+          },
+          {
+            OR: [
+              { hasTranscription: false },
+              { durationMinutes: null },
+            ],
+          },
+        ],
+      },
+      select: {
+        id: true,
+        subject: true,
+        joinUrl: true,
+        hasTranscription: true,
+        durationMinutes: true,
+      },
+      orderBy: { endDateTime: 'desc' },
+      take: 200,
+    })
 
     if (toCheck.length > 0) {
       after(async () => {
-        await Promise.all(
-          toCheck.map(async (m) => {
-            try {
-              const transcription = await getTranscription(userId, m.joinUrl!, { subject: m.subject })
-              if (transcription) {
-                const durationMinutes = extractVttDurationMinutes(transcription)
-                await prisma.meeting.update({
-                  where: { id: m.id },
-                  data: {
-                    hasTranscription: true,
-                    ...(durationMinutes !== null && { durationMinutes }),
-                  },
-                })
-              }
-            } catch {
-              // Silencieux — pas de transcription ou erreur Graph
-            }
-          })
-        )
+        await refreshMeetingsTranscriptionMetadata(userId, toCheck, { concurrency: 5 })
       })
     }
 
