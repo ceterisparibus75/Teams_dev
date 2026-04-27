@@ -6,6 +6,7 @@ import { prisma } from '@/lib/prisma'
 import { generateDocx, buildDocxFilename } from '@/lib/docx-generator'
 import { sendMinutesEmail } from '@/lib/email-sender'
 import { getMinutesQualityAlerts } from '@/lib/minutes-quality'
+import { rateLimit } from '@/lib/rate-limit'
 import type { MinutesContent, TemplateSection } from '@/types'
 
 const BodySchema = z.object({
@@ -30,6 +31,17 @@ export async function POST(
 ) {
   const session = await getServerSession(authOptions)
   if (!session?.user?.id) return NextResponse.json({ error: 'Non autorisé' }, { status: 401 })
+
+  // Cap : 20 envois par utilisateur / 5 min — protège contre les loops
+  // côté UI et cap le coût Graph API. La taille de pièce jointe DOCX
+  // peut atteindre plusieurs Mo, donc l'envoi est non-trivial.
+  const rl = rateLimit({ name: 'send-minutes', key: session.user.id, limit: 20, windowMs: 5 * 60_000 })
+  if (!rl.ok) {
+    return NextResponse.json(
+      { error: 'Trop d\'envois en peu de temps', retryAfterSec: rl.retryAfterSec },
+      { status: 429, headers: { 'Retry-After': String(rl.retryAfterSec) } },
+    )
+  }
 
   const { minutesId } = await params
   const rawBody = await req.json().catch(() => null)
