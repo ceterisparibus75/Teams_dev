@@ -9,6 +9,7 @@ import { SendModal } from '@/components/minutes/SendModal'
 import { formatDateTime } from '@/lib/utils'
 import { getMinutesQualityAlerts, type MinutesQualityAlert } from '@/lib/minutes-quality'
 import type { PvContent } from '@/schemas/pv-content.schema'
+import type { AttendanceWarning } from '@/lib/attendance-warning'
 import type { MinutesContent, TemplateSection } from '@/types'
 
 interface PromptOption {
@@ -68,6 +69,10 @@ interface ApiErrorPayload {
   code?: string
   detail?: string | null
   qualityAlerts?: MinutesQualityAlert[]
+}
+
+interface RegenerateResponse {
+  attendanceWarning?: AttendanceWarning | null
 }
 
 function splitEditableLines(value: string): string[] {
@@ -231,6 +236,12 @@ export default function MinutesDetailPage() {
         })
         return
       }
+      const payload = (await res.json().catch(() => ({}))) as RegenerateResponse
+      if (payload.attendanceWarning) {
+        toast.warning(payload.attendanceWarning.message, {
+          description: payload.attendanceWarning.detail ?? undefined,
+        })
+      }
       toast.success('Compte rendu régénéré')
       router.refresh()
       // Reload fresh content
@@ -302,7 +313,7 @@ export default function MinutesDetailPage() {
   if (loadError) {
     return (
       <div className="bg-red-50 border border-red-200 rounded-xl p-6 space-y-3">
-        <p className="text-sm font-semibold text-red-700">Impossible d'afficher ce compte rendu</p>
+        <p className="text-sm font-semibold text-red-700">Impossible d&apos;afficher ce compte rendu</p>
         <p className="text-sm text-red-600">{loadError}</p>
         <button onClick={() => router.back()} className="text-sm text-red-600 underline">← Retour</button>
       </div>

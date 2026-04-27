@@ -1,0 +1,7 @@
+node_modules
+.next
+out
+coverage
+bot
+package-lock.json
+prisma/seed.ts

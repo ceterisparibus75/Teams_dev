@@ -99,6 +99,7 @@ model Meeting {
   organizerId      String
   joinUrl          String?
   hasTranscription Boolean               @default(false)
+  durationMinutes  Int?
   processedAt      DateTime?
   platform         MeetingPlatform       @default(TEAMS_INTERNAL)
   externalUrl      String?
@@ -240,6 +241,15 @@ model GenerationAuditLog {
   createdAt      DateTime @default(now())
 
   @@index([userId, createdAt])
+}
+
+// État persistant des jobs cron — évite que le cooldown en mémoire
+// soit perdu après un cold start ou un crash lambda Vercel.
+model CronRun {
+  job        String   @id
+  lastRunAt  DateTime
+  lastStatus String?
+  updatedAt  DateTime @updatedAt
 }
 
 // Historique des modifications de PV — traçabilité juridique

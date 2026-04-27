@@ -1,23 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
-import type { Prisma } from '@prisma/client'
 import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 
 type OperationState = 'ready' | 'processing' | 'failed' | 'blocked' | 'pending'
 type TranscriptionState = 'found' | 'missing' | 'pending'
 type GenerationState = 'not_started' | 'in_progress' | 'done' | 'failed' | 'draft_without_transcript'
-
-function readJsonString(value: Prisma.JsonValue, key: string): string | null {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
-  const found = value[key]
-  return typeof found === 'string' && found.trim() ? found : null
-}
-
-function readJsonBoolean(value: Prisma.JsonValue, key: string): boolean {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
-  return value[key] === true
-}
 
 function formatError(message: string | null | undefined): string | null {
   if (!message) return null

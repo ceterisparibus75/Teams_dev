@@ -1,24 +1,28 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getMeetingsEndedInLastHours, getTranscription } from '@/lib/microsoft-graph'
+import { getAttendanceWarning } from '@/lib/attendance-warning'
+import { getAttendanceLookup, getMeetingsEndedInLastHours, getTranscription } from '@/lib/microsoft-graph'
 import { generateMinutesContent } from '@/lib/azure-openai'
+import { extractVttDurationMinutes } from '@/lib/utils'
+import { safeBearerEqual } from '@/lib/secrets'
+import { toPrismaJson } from '@/lib/minutes-persist'
 
-// Cooldown in-memory : protège contre les replay attacks (token intercepté)
-// Vercel Cron tourne toutes les 2h — cooldown 90 min laisse une marge confortable
+// Cooldown persisté en BD — survit aux cold starts lambda et aux redémarrages.
+// Vercel Cron tourne toutes les 2h — cooldown 90 min laisse une marge confortable.
 const COOLDOWN_MS = 90 * 60_000 // 90 minutes
-let lastSuccessfulRun: number | null = null
+const CRON_JOB_NAME = 'poll'
 
 export async function GET(req: NextRequest) {
-  const authHeader = req.headers.get('authorization')
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+  if (!safeBearerEqual(req.headers.get('authorization'), process.env.CRON_SECRET)) {
     return NextResponse.json({ error: 'Non autorisé' }, { status: 401 })
   }
 
-  // Vérification du cooldown
-  if (lastSuccessfulRun !== null) {
-    const elapsed = Date.now() - lastSuccessfulRun
+  // Vérification du cooldown (persistant en BD)
+  const lastRun = await prisma.cronRun.findUnique({ where: { job: CRON_JOB_NAME } })
+  if (lastRun) {
+    const elapsed = Date.now() - lastRun.lastRunAt.getTime()
     if (elapsed < COOLDOWN_MS) {
-      const nextAllowedAt = new Date(lastSuccessfulRun + COOLDOWN_MS).toISOString()
+      const nextAllowedAt = new Date(lastRun.lastRunAt.getTime() + COOLDOWN_MS).toISOString()
       return NextResponse.json({ skipped: true, reason: 'cooldown', nextAllowedAt }, { status: 200 })
     }
   }
@@ -89,21 +93,37 @@ export async function GET(req: NextRequest) {
       const transcription = await getTranscription(user.id, gm.joinUrl, {
         subject: gm.subject,
       })
-      const content = await generateMinutesContent(gm.subject, transcription)
+      const attendanceLookup = await getAttendanceLookup(user.id, gm.joinUrl)
+      const attendanceWarning = getAttendanceWarning(attendanceLookup)
+      if (attendanceWarning) console.warn('[cron/poll] Attendance warning:', attendanceWarning)
+      const content = await generateMinutesContent(
+        gm.subject,
+        transcription,
+        gm.attendees.map((a) => ({
+          name: a.emailAddress.name,
+          email: a.emailAddress.address,
+        })),
+        { userId: user.id, meetingDate: new Date(gm.startDateTime), attendanceLookup }
+      )
 
       await prisma.meetingMinutes.create({
         data: {
           meetingId: gm.id,
           authorId: user.id,
           templateId: defaultTemplate?.id ?? null,
-          content: content as unknown as import('@prisma/client').Prisma.InputJsonValue,
+          content: toPrismaJson(content as object),
           status: 'DRAFT',
         },
       })
 
+      const durationMinutes = transcription ? extractVttDurationMinutes(transcription) : null
       await prisma.meeting.update({
         where: { id: gm.id },
-        data: { hasTranscription: !!transcription, processedAt: new Date() },
+        data: {
+          hasTranscription: !!transcription,
+          processedAt: new Date(),
+          ...(durationMinutes !== null && { durationMinutes }),
+        },
       })
 
       processed++
@@ -111,6 +131,10 @@ export async function GET(req: NextRequest) {
   }
 
   // Marquer la fin d'une exécution réussie (démarre le cooldown)
-  lastSuccessfulRun = Date.now()
+  await prisma.cronRun.upsert({
+    where: { job: CRON_JOB_NAME },
+    create: { job: CRON_JOB_NAME, lastRunAt: new Date(), lastStatus: 'ok' },
+    update: { lastRunAt: new Date(), lastStatus: 'ok' },
+  })
   return NextResponse.json({ processed, users: usersWithToken.length })
 }

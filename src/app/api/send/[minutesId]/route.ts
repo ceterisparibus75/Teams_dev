@@ -1,11 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
+import { z } from 'zod'
 import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { generateDocx, buildDocxFilename } from '@/lib/docx-generator'
 import { sendMinutesEmail } from '@/lib/email-sender'
 import { getMinutesQualityAlerts } from '@/lib/minutes-quality'
 import type { MinutesContent, TemplateSection } from '@/types'
+
+const BodySchema = z.object({
+  recipients: z.array(
+    z.object({
+      name: z.string().trim().min(1).max(200),
+      email: z.string().trim().email().max(320),
+    })
+  ).min(1).max(100),
+}).strict()
 
 const DEFAULT_SECTIONS: TemplateSection[] = [
   { id: 'summary',   label: 'Résumé',               type: 'text',  aiGenerated: true  },
@@ -22,9 +32,12 @@ export async function POST(
   if (!session?.user?.id) return NextResponse.json({ error: 'Non autorisé' }, { status: 401 })
 
   const { minutesId } = await params
-  const { recipients } = await req.json() as {
-    recipients: Array<{ name: string; email: string }>
+  const rawBody = await req.json().catch(() => null)
+  const parsed = BodySchema.safeParse(rawBody)
+  if (!parsed.success) {
+    return NextResponse.json({ error: 'Body invalide', code: 'invalid_body' }, { status: 400 })
   }
+  const { recipients } = parsed.data
 
   const minutes = await prisma.meetingMinutes.findFirst({
     where: {

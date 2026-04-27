@@ -2,9 +2,11 @@ import { NextRequest, NextResponse, after } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
-import { getTranscription } from '@/lib/microsoft-graph'
+import { getAttendanceLookup, getTranscription } from '@/lib/microsoft-graph'
 import { generateMinutesContent, createSkeletonContent } from '@/lib/azure-openai'
-import type { Prisma } from '@prisma/client'
+import { getAttendanceWarning } from '@/lib/attendance-warning'
+import { extractVttDurationMinutes } from '@/lib/utils'
+import { toPrismaJson } from '@/lib/minutes-persist'
 
 // Plan Pro : 300 s max. Le handler répond en < 1 s (squelette),
 // le reste du budget est utilisé par after() pour la transcription + Claude.
@@ -37,11 +39,11 @@ export async function POST(
 
   // Squelette immédiat — transcription et Claude se font entièrement en arrière-plan
   const skeleton = createSkeletonContent(meeting.subject, meeting.participants, meeting.startDateTime)
-  const skeletonWithFlag = {
+  const skeletonWithFlag = toPrismaJson({
     ...(skeleton as object),
     _generating: true,
     _generatingStartedAt: new Date().toISOString(),
-  } as Prisma.InputJsonValue
+  })
 
   let savedMinutes
   if (existingMinutes) {
@@ -67,6 +69,8 @@ export async function POST(
   const participants = meeting.participants
   const startDateTime = meeting.startDateTime
   const joinUrl = meeting.joinUrl
+  const attendanceLookup = await getAttendanceLookup(userId, joinUrl)
+  const attendanceWarning = getAttendanceWarning(attendanceLookup)
 
   // Tout en arrière-plan : récupération transcription + génération Claude
   after(async () => {
@@ -75,9 +79,14 @@ export async function POST(
 
       const transcription = await getTranscription(userId, joinUrl, { subject: meetingSubject })
 
+      const durationMinutes = transcription ? extractVttDurationMinutes(transcription) : null
       await prisma.meeting.update({
         where: { id: meetingId },
-        data: { hasTranscription: !!transcription, processedAt: new Date() },
+        data: {
+          hasTranscription: !!transcription,
+          processedAt: new Date(),
+          ...(durationMinutes !== null && { durationMinutes }),
+        },
       })
 
       if (!transcription) {
@@ -87,7 +96,7 @@ export async function POST(
           where: { id: minutesId },
           data: {
             isGenerating: false,
-            content: { ...(fallback as object), _generating: false } as Prisma.InputJsonValue,
+            content: toPrismaJson({ ...(fallback as object), _generating: false }),
           },
         })
         return
@@ -98,13 +107,13 @@ export async function POST(
         meetingSubject,
         transcription,
         participants,
-        { userId, minutesId, meetingDate: startDateTime ?? undefined }
+        { userId, minutesId, meetingDate: startDateTime ?? undefined, attendanceLookup }
       )
       await prisma.meetingMinutes.update({
         where: { id: minutesId },
         data: {
           isGenerating: false,
-          content: { ...(content as object), _generating: false } as Prisma.InputJsonValue,
+          content: toPrismaJson({ ...(content as object), _generating: false }),
         },
       })
       console.log(`[generate/after] ✓ CR généré — minutesId=${minutesId}`)
@@ -116,15 +125,15 @@ export async function POST(
         where: { id: minutesId },
         data: {
           isGenerating: false,
-          content: {
+          content: toPrismaJson({
             ...(fallback as object),
             _generating: false,
             _generationError: errMsg,
-          } as Prisma.InputJsonValue,
+          }),
         },
       })
     }
   })
 
-  return NextResponse.json({ ...savedMinutes, content: skeletonWithFlag, generating: true })
+  return NextResponse.json({ ...savedMinutes, content: skeletonWithFlag, generating: true, attendanceWarning })
 }

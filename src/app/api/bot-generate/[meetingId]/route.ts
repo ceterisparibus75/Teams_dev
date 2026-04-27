@@ -1,6 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { z } from 'zod'
 import { prisma } from '@/lib/prisma'
 import { generateMinutesContent } from '@/lib/azure-openai'
+import { getAttendanceWarning } from '@/lib/attendance-warning'
+import { getAttendanceLookup } from '@/lib/microsoft-graph'
+import { safeEqual } from '@/lib/secrets'
+import { toPrismaJson } from '@/lib/minutes-persist'
+
+const MAX_TRANSCRIPT_CHARS = 500_000
+const BodySchema = z.object({
+  transcript: z.string().max(MAX_TRANSCRIPT_CHARS).nullable(),
+})
 
 // Rate limiting in-memory : un appel par meetingId toutes les 60 secondes
 const rateLimitMap = new Map<string, number>()
@@ -29,8 +39,7 @@ export async function POST(
   { params }: { params: Promise<{ meetingId: string }> }
 ) {
   // Authentification bot uniquement — pas de session utilisateur
-  const botSecret = req.headers.get('x-bot-secret')
-  if (!botSecret || botSecret !== process.env.BOT_SECRET) {
+  if (!safeEqual(req.headers.get('x-bot-secret'), process.env.BOT_SECRET)) {
     return NextResponse.json({ error: 'Non autorisé' }, { status: 401 })
   }
 
@@ -40,7 +49,13 @@ export async function POST(
   if (!checkRateLimit(meetingId)) {
     return NextResponse.json({ error: 'Trop de requêtes' }, { status: 429 })
   }
-  const { transcript } = (await req.json()) as { transcript: string | null }
+
+  const rawBody = await req.json().catch(() => null)
+  const parsed = BodySchema.safeParse(rawBody)
+  if (!parsed.success) {
+    return NextResponse.json({ error: 'Body invalide', code: 'invalid_body' }, { status: 400 })
+  }
+  const { transcript } = parsed.data
 
   const meeting = await prisma.meeting.findUnique({
     where: { id: meetingId },
@@ -50,11 +65,14 @@ export async function POST(
 
   const existingMinutes = await prisma.meetingMinutes.findUnique({ where: { meetingId } })
   const defaultTemplate = await prisma.template.findFirst({ where: { isDefault: true } })
+  const attendanceLookup = await getAttendanceLookup(meeting.organizerId, meeting.joinUrl)
+  const attendanceWarning = getAttendanceWarning(attendanceLookup)
+  if (attendanceWarning) console.warn('[bot-generate] Attendance warning:', attendanceWarning)
   const content = await generateMinutesContent(
     meeting.subject,
     transcript,
     meeting.participants,
-    { meetingDate: meeting.startDateTime ?? undefined }
+    { meetingDate: meeting.startDateTime ?? undefined, attendanceLookup }
   )
 
   if (existingMinutes) {
@@ -69,9 +87,9 @@ export async function POST(
         data: { hasTranscription: true },
       })
       console.log(`[bot-generate] Compte rendu mis à jour avec transcription pour "${meeting.subject}"`)
-      return NextResponse.json({ ok: true, updated: true })
+      return NextResponse.json({ ok: true, updated: true, attendanceWarning })
     }
-    return NextResponse.json({ ok: true, alreadyExists: true })
+    return NextResponse.json({ ok: true, alreadyExists: true, attendanceWarning })
   }
 
   await prisma.meetingMinutes.create({
@@ -79,11 +97,11 @@ export async function POST(
       meetingId,
       authorId: meeting.organizerId,
       templateId: defaultTemplate?.id ?? null,
-      content: content as unknown as import('@prisma/client').Prisma.InputJsonValue,
+      content: toPrismaJson(content as object),
       status: 'DRAFT',
     },
   })
 
   console.log(`[bot-generate] Compte rendu créé pour "${meeting.subject}"`)
-  return NextResponse.json({ ok: true })
+  return NextResponse.json({ ok: true, attendanceWarning })
 }

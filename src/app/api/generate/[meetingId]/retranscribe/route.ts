@@ -1,9 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
+import { z } from 'zod'
 import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { generateMinutesContent } from '@/lib/azure-openai'
-import { getTranscriptionResult } from '@/lib/microsoft-graph'
+import { getAttendanceWarning } from '@/lib/attendance-warning'
+import { getAttendanceLookup, getTranscriptionResult } from '@/lib/microsoft-graph'
+import { toPrismaJson } from '@/lib/minutes-persist'
+
+// Seuls les modèles Anthropic sont acceptés ; empêche la substitution vers un
+// autre fournisseur via un body arbitraire.
+const BodySchema = z.object({
+  promptText: z.string().trim().min(1).max(50_000).optional(),
+  modelName: z.string().regex(/^claude-[a-z0-9.-]+$/i).max(100).optional(),
+}).strict()
 
 function withDetail(message: string, detail?: string) {
   return detail ? `${message} Détail Graph: ${detail}` : message
@@ -86,9 +96,13 @@ export async function POST(
   if (!session?.user?.id) return NextResponse.json({ error: 'Non autorisé' }, { status: 401 })
 
   const { meetingId } = await params
-  const body = await req.json().catch(() => ({}))
-  const customPromptText: string | undefined = body.promptText || undefined
-  const customModelName: string | undefined = body.modelName || undefined
+  const rawBody = await req.json().catch(() => ({}))
+  const parsed = BodySchema.safeParse(rawBody)
+  if (!parsed.success) {
+    return NextResponse.json({ error: 'Body invalide', code: 'invalid_body' }, { status: 400 })
+  }
+  const customPromptText = parsed.data.promptText
+  const customModelName = parsed.data.modelName
 
   const meeting = await prisma.meeting.findFirst({
     where: {
@@ -132,12 +146,22 @@ export async function POST(
   })
 
   let content
+  let attendanceWarning
   try {
+    const attendanceLookup = await getAttendanceLookup(session.user.id, meeting.joinUrl)
+    attendanceWarning = getAttendanceWarning(attendanceLookup)
     content = await generateMinutesContent(
       meeting.subject,
       transcriptResult.transcription,
       meeting.participants,
-      { userId: session.user.id, minutesId: existingMinutes.id, promptText: customPromptText, modelName: customModelName, meetingDate: meeting.startDateTime ?? undefined }
+      {
+        userId: session.user.id,
+        minutesId: existingMinutes.id,
+        promptText: customPromptText,
+        modelName: customModelName,
+        meetingDate: meeting.startDateTime ?? undefined,
+        attendanceLookup,
+      }
     )
   } catch (genError) {
     const msg = genError instanceof Error ? genError.message : 'Erreur inconnue'
@@ -150,8 +174,8 @@ export async function POST(
 
   await prisma.meetingMinutes.update({
     where: { meetingId },
-    data: { content: content as unknown as import('@prisma/client').Prisma.InputJsonValue },
+    data: { content: toPrismaJson(content as object) },
   })
 
-  return NextResponse.json({ ok: true, minutesId: existingMinutes.id })
+  return NextResponse.json({ ok: true, minutesId: existingMinutes.id, attendanceWarning })
 }

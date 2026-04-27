@@ -3,6 +3,7 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { getMinutesQualityAlerts } from '@/lib/minutes-quality'
+import { MinutesPatchSchema, toPrismaJson } from '@/lib/minutes-persist'
 import type { MinutesContent } from '@/types'
 
 export async function GET(
@@ -44,7 +45,7 @@ export async function GET(
       where: { id },
       data: {
         isGenerating: false,
-        content: { ...raw, _generating: false, _generationError: errorMsg } as import('@prisma/client').Prisma.InputJsonValue,
+        content: toPrismaJson({ ...raw, _generating: false, _generationError: errorMsg }),
       },
     })
   }
@@ -64,7 +65,12 @@ export async function PATCH(
   if (!session?.user?.id) return NextResponse.json({ error: 'Non autorisé' }, { status: 401 })
 
   const { id } = await params
-  const { content, status } = await req.json()
+  const rawBody = await req.json().catch(() => null)
+  const parsed = MinutesPatchSchema.safeParse(rawBody)
+  if (!parsed.success) {
+    return NextResponse.json({ error: 'Body invalide', code: 'invalid_body' }, { status: 400 })
+  }
+  const { content, status } = parsed.data
 
   try {
     const accessibleMinutes = await prisma.meetingMinutes.findFirst({
@@ -91,14 +97,16 @@ export async function PATCH(
         userId: session.user.id,
         action: content !== undefined ? 'content_edit' : 'status_change',
         previousStatus: accessibleMinutes.status,
-        contentSnapshot: accessibleMinutes.content as import('@prisma/client').Prisma.InputJsonValue,
+        contentSnapshot: toPrismaJson(
+          (accessibleMinutes.content ?? {}) as object,
+        ),
       },
     })
 
     const updated = await prisma.meetingMinutes.update({
       where: { id: accessibleMinutes.id },
       data: {
-        ...(content !== undefined && { content }),
+        ...(content !== undefined && { content: toPrismaJson(content) }),
         ...(status !== undefined && { status }),
         ...(status === 'VALIDATED' && {
           validatedById: session.user.id,

@@ -2,7 +2,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import { createHash } from 'crypto'
 import { prisma } from '@/lib/prisma'
 import { PvContentSchema, type PvContent } from '@/schemas/pv-content.schema'
-import type { MinutesContent, PVSection } from '@/types'
+import type { MeetingAttendanceLookup, MeetingAttendanceRecord, MinutesContent, PVSection } from '@/types'
 
 // ─── Constantes prompt ────────────────────────────────────────────────────────
 
@@ -190,12 +190,13 @@ Les tournures impersonnelles restent autorisées si l’auteur exact ne peut pas
 
 sections : 4 à 8 sections thématiques. Chaque section doit être substantielle et couvrir un vrai thème avec suffisamment de matière pour être utile. Une section peut combiner paragraphes analytiques, éléments listés, décisions et suites opérationnelles. Paragraphes séparés par \\n\\n, listes par \\n- . Aucun gras, aucune italique, aucune mise en forme parasite.
 participants : tableau exhaustif avec catégorie (debiteur, conseil_debiteur, partenaire_bancaire, conseil_partenaire, auditeur_expert, mandataire_ad_hoc, conciliateur, administrateur_judiciaire, mandataire_judiciaire, actionnaire, repreneur, autre). Inclure tous les participants connus ou listés dans l’invitation si l’information est disponible.
+La liste Teams est une liste d'invités, pas une preuve de présence effective.
 Présence — règles strictes :
-- 'Visioconférence' : participant présent en visio
+ - 'Visioconférence' : participant présent en visio, car il intervient dans la transcription, sa présence est explicitement confirmée, ou le contexte de réunion permet de le considérer comme présent
 - 'Présentiel' : participant présent physiquement
 - 'Téléphonique' : participant présent par téléphone
-- 'Absent' : invité absent ou excusé
-Un participant présent mais silencieux n’est pas 'Absent'.
+- 'Absent' : invité explicitement absent, excusé, ou ayant décliné la réunion
+Ne jamais déduire l'absence d'un participant de son seul silence dans la transcription : un participant peut être présent sans parler.
 ⚠⚠ IDENTIFICATION DES MEMBRES BL & ASSOCIÉS — RÈGLE STRICTE :
 Un participant appartient à SELAS BL & Associés uniquement si son adresse email contient "@bl-aj.fr". Ne jamais déduire l’appartenance au cabinet par le contexte, la proximité avec d’autres membres ou une mention ambiguë.
 Si un participant a un email @bl-aj.fr, sa catégorie est obligatoirement :
@@ -452,18 +453,170 @@ const MAX_HEAD_CHARS = 40_000
 const MAX_MIDDLE_CHARS = 10_000
 const MAX_TAIL_CHARS = 10_000
 
+function normalizeNameForMatching(value: string): string {
+  return value
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function nameTokens(value: string): string[] {
+  return normalizeNameForMatching(value)
+    .split(' ')
+    .filter((token) => token.length >= 3)
+}
+
+function namesLikelyMatch(a: string, b: string): boolean {
+  const normalizedA = normalizeNameForMatching(a)
+  const normalizedB = normalizeNameForMatching(b)
+  if (!normalizedA || !normalizedB) return false
+  if (normalizedA.includes(normalizedB) || normalizedB.includes(normalizedA)) return true
+
+  const tokensA = new Set(nameTokens(a))
+  const tokensB = nameTokens(b)
+  if (tokensA.size === 0 || tokensB.length === 0) return false
+
+  const overlap = tokensB.filter((token) => tokensA.has(token)).length
+  return overlap >= Math.min(2, tokensB.length)
+}
+
+function extractTranscriptSpeakers(transcription: string | null): string[] {
+  if (!transcription) return []
+
+  const speakers = new Set<string>()
+  const regex = /^\s*\[([^\]]+)]/gm
+  let match: RegExpExecArray | null
+  while ((match = regex.exec(transcription)) !== null) {
+    const speaker = match[1]?.trim()
+    if (speaker) speakers.add(speaker)
+  }
+  return [...speakers]
+}
+
+function participantAppearsInTranscript(participantName: string, transcription: string | null, speakers: string[]): boolean {
+  if (!transcription) return false
+  if (speakers.some((speaker) => namesLikelyMatch(speaker, participantName))) return true
+
+  const normalizedTranscript = normalizeNameForMatching(transcription)
+  const normalizedParticipant = normalizeNameForMatching(participantName)
+  return normalizedParticipant.length > 0 && normalizedTranscript.includes(normalizedParticipant)
+}
+
+function attendanceLikelyMatchesParticipant(
+  attendance: MeetingAttendanceRecord,
+  participant: PvContent['participants'][number]
+): boolean {
+  const attendanceEmail = attendance.email?.toLowerCase()
+  const participantEmail = participant.email?.toLowerCase()
+  if (attendanceEmail && participantEmail && attendanceEmail === participantEmail) return true
+  return namesLikelyMatch(attendance.name, participant.civilite_nom)
+}
+
+function attendanceShowsPresence(attendance: MeetingAttendanceRecord): boolean {
+  return (attendance.totalAttendanceInSeconds ?? 0) > 0 || attendance.intervals.length > 0
+}
+
+function transcriptExplicitlyMarksAbsent(participantName: string, transcription: string | null): boolean {
+  if (!transcription) return false
+
+  const participantTokens = nameTokens(participantName)
+  if (participantTokens.length === 0) return false
+
+  const absenceMarkers = [
+    'absent',
+    'absente',
+    'absents',
+    'absentes',
+    'excuse',
+    'excusee',
+    'excuses',
+    'excusees',
+    'decline',
+    'declinee',
+    'declines',
+    'declinees',
+    'ne participe pas',
+    'ne participera pas',
+    'n est pas present',
+    'n est pas presente',
+    'ne sera pas present',
+    'ne sera pas presente',
+  ]
+
+  return transcription
+    .split(/\r?\n|[.!?;]/)
+    .map(normalizeNameForMatching)
+    .some((line) => {
+      if (!line || !absenceMarkers.some((marker) => line.includes(marker))) return false
+      return participantTokens.every((token) => line.includes(token))
+    })
+}
+
+export function normalizeParticipantPresenceFromTranscript(
+  pv: PvContent,
+  transcription: string | null,
+  attendanceRecords: MeetingAttendanceRecord[] = []
+): PvContent {
+  const speakers = extractTranscriptSpeakers(transcription)
+  if (speakers.length === 0 && !transcription) return pv
+
+  return {
+    ...pv,
+    participants: pv.participants.map((participant) => {
+      const attendance = attendanceRecords.find((record) => attendanceLikelyMatchesParticipant(record, participant))
+      if (attendance) {
+        return {
+          ...participant,
+          presence: attendanceShowsPresence(attendance) ? 'Visioconférence' as const : participant.presence,
+        }
+      }
+
+      if (attendanceRecords.length > 0 && participant.presence !== 'Absent') {
+        return { ...participant, presence: 'Absent' as const }
+      }
+
+      if (participant.presence === 'Absent') return participant
+      if (transcriptExplicitlyMarksAbsent(participant.civilite_nom, transcription)) {
+        return { ...participant, presence: 'Absent' as const }
+      }
+      if (participantAppearsInTranscript(participant.civilite_nom, transcription, speakers)) return participant
+      return participant
+    }),
+  }
+}
+
 export function buildPrompt(
   subject: string,
   transcription: string | null,
   participants?: Array<{ name: string; email?: string; company?: string | null }>,
-  date?: Date
+  date?: Date,
+  attendanceRecords: MeetingAttendanceRecord[] = []
 ): string {
   const dateStr = date
     ? date.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
     : null
   const dateBlock = dateStr ? `\nDate de la réunion : ${dateStr}` : ''
+  const detectedSpeakers = extractTranscriptSpeakers(transcription)
+  const speakersBlock = detectedSpeakers.length
+    ? `\nIntervenants détectés dans la transcription (à considérer comme présents ; l'absence des autres invités ne doit pas être déduite de leur silence) :\n${detectedSpeakers.map((speaker) => `- ${speaker}`).join('\n')}`
+    : ''
+  const attendanceBlock = attendanceRecords.length
+    ? `\nRapport de présence Teams (source prioritaire pour le champ presence) :\n${attendanceRecords.map((record) => {
+        const duration = record.totalAttendanceInSeconds
+          ? ` — ${Math.round(record.totalAttendanceInSeconds / 60)} min`
+          : ''
+        const intervals = record.intervals
+          .map((interval) => [interval.joinDateTime, interval.leaveDateTime].filter(Boolean).join(' → '))
+          .filter(Boolean)
+          .join(' ; ')
+        return `- ${record.name}${record.email ? ` <${record.email}>` : ''}${duration}${intervals ? ` (${intervals})` : ''}`
+      }).join('\n')}`
+    : ''
   const participantsBlock = participants?.length
-    ? `\nParticipants (liste Teams — utilise l'email pour catégoriser et le recopier dans le champ email) :\n${participants.map((p) => {
+    ? `\nParticipants (liste Teams d'invitation — ne pas assimiler automatiquement à la liste des présents) :\n${participants.map((p) => {
         const isCabinet = p.email?.toLowerCase().includes('@bl-aj.fr')
         const parts = [p.name]
         if (p.email) parts.push(`<${p.email}>`)
@@ -489,7 +642,7 @@ export function buildPrompt(
   const transcriptionBlock = safeTranscription
     ? `TRANSCRIPTION DE LA RÉUNION :\n\n${safeTranscription}`
     : `Note : aucune transcription disponible. Remplis uniquement ce qui est déductible du sujet et des participants.`
-  return `Affaire : "${subject}"${dateBlock}${participantsBlock}\n\n${transcriptionBlock}`
+  return `Affaire : "${subject}"${dateBlock}${participantsBlock}${attendanceBlock}${speakersBlock}\n\n${transcriptionBlock}`
 }
 
 // ─── Parser texte (conservé pour les tests + fallback) ───────────────────────
@@ -572,12 +725,21 @@ export async function generateMinutesContent(
   subject: string,
   transcription: string | null,
   participants?: Array<{ name: string; email?: string; company?: string | null }>,
-  options?: { userId?: string; minutesId?: string; promptText?: string; modelName?: string; meetingDate?: Date }
+  options?: {
+    userId?: string
+    minutesId?: string
+    promptText?: string
+    modelName?: string
+    meetingDate?: Date
+    attendanceRecords?: MeetingAttendanceRecord[]
+    attendanceLookup?: MeetingAttendanceLookup
+  }
 ): Promise<MinutesContent> {
   const client = getClient()
   const model = options?.modelName ?? 'claude-opus-4-7'
   const systemPrompt = options?.promptText ?? SYSTEM_PROMPT
-  const userMessage = buildPrompt(subject, transcription, participants, options?.meetingDate)
+  const attendanceRecords = options?.attendanceLookup?.records ?? options?.attendanceRecords ?? []
+  const userMessage = buildPrompt(subject, transcription, participants, options?.meetingDate, attendanceRecords)
   const startMs = Date.now()
 
   let tokensInput = 0
@@ -710,7 +872,9 @@ export async function generateMinutesContent(
         }
         const lenientValidation = PvContentSchema.safeParse(lenientInput)
         if (lenientValidation.success) {
-          return pvContentToMinutesContent(lenientValidation.data)
+          return pvContentToMinutesContent(
+            normalizeParticipantPresenceFromTranscript(lenientValidation.data, transcription, attendanceRecords)
+          )
         }
         throw new Error(
           `Réponse Claude invalide (Zod) : ${lenientValidation.error.issues.map(i => i.message).join(', ')} | clés reçues: ${topLevelKeys}`
@@ -723,7 +887,9 @@ export async function generateMinutesContent(
       )
     }
 
-    return pvContentToMinutesContent(validation.data)
+    return pvContentToMinutesContent(
+      normalizeParticipantPresenceFromTranscript(validation.data, transcription, attendanceRecords)
+    )
   } catch (error) {
     status = 'error'
     errorMessage = error instanceof Error ? error.message : String(error)
