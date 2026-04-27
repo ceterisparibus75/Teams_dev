@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
-import { generateMinutesContent } from '@/lib/azure-openai'
+import { generateMinutesContent } from '@/lib/claude-generator'
 
 export async function POST(req: NextRequest) {
   const session = await getServerSession(authOptions)

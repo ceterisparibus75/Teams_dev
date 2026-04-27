@@ -4,7 +4,7 @@ import {
   createSkeletonContent,
   pvContentToMinutesContent,
   normalizeParticipantPresenceFromTranscript,
-} from '@/lib/azure-openai'
+} from '@/lib/claude-generator'
 import type { PvContent } from '@/schemas/pv-content.schema'
 
 describe('buildPrompt', () => {

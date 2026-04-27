@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { prisma } from '@/lib/prisma'
-import { generateMinutesContent } from '@/lib/azure-openai'
+import { generateMinutesContent } from '@/lib/claude-generator'
 import { getAttendanceWarning } from '@/lib/attendance-warning'
 import { getAttendanceLookup } from '@/lib/microsoft-graph'
 import { safeEqual } from '@/lib/secrets'

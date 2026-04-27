@@ -91,8 +91,7 @@ npm run bot          # Bot Express sur http://localhost:3001 (terminal séparé)
 | `BOT_DISPLAY` | Non | Display Xvfb Linux (défaut: `:99`) |
 | `BOT_AUDIO_DIR` | Non | Dossier audio temp (défaut: `/tmp/bot-audio`) |
 
-**Variables à NE PAS renseigner** (présentes dans .env.example par erreur, jamais utilisées) :
-- `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_DEPLOYMENT`
+**Note** : les anciennes variables `AZURE_OPENAI_*` ont été retirées (jamais utilisées — l'app passe par Claude / Anthropic SDK).
 
 ### Configuration Azure AD requise
 
@@ -454,7 +453,7 @@ Callback `session()` :
 - Retourne `TranscriptionResult` (ok/error avec reason précise)
 - Reasons possibles : `missing_join_url`, `missing_connection`, `reauth_required`, `permission_denied`, `policy_denied`, `meeting_not_found`, `transcript_not_found`, `transcript_empty`, `graph_error`
 
-### azure-openai.ts — Génération Claude
+### claude-generator.ts — Génération Claude
 
 **`generateMinutesContent(subject, transcription, participants?, options?)`**
 
@@ -745,4 +744,4 @@ npx prisma migrate deploy
 ### Maintenance
 
 - **Template par défaut** : pas de contrainte unique en BD — possible d'avoir plusieurs templates `isDefault: true` si bug.
-- **Variables .env.example obsolètes** : `AZURE_OPENAI_*` présentes mais jamais utilisées dans le code.
+- **Job queue** : la génération PV passe par Inngest (`src/inngest/`), 3 retries automatiques, concurrency 5. Dashboard local : `npx inngest-cli@latest dev`.

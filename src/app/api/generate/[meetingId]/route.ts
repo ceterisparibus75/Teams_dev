@@ -3,9 +3,10 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { getAttendanceLookup } from '@/lib/microsoft-graph'
-import { createSkeletonContent } from '@/lib/azure-openai'
+import { createSkeletonContent } from '@/lib/claude-generator'
 import { getAttendanceWarning } from '@/lib/attendance-warning'
 import { toPrismaJson } from '@/lib/minutes-persist'
+import { rateLimit } from '@/lib/rate-limit'
 import { inngest } from '@/inngest/client'
 
 export async function POST(
@@ -17,6 +18,16 @@ export async function POST(
 
   const { meetingId } = await params
   const userId = session.user.id
+
+  // Cap : 10 générations par utilisateur / 5 min — protège contre le spam
+  // (le job réel est ensuite cappé par la concurrency Inngest).
+  const rl = rateLimit({ name: 'generate-pv', key: userId, limit: 10, windowMs: 5 * 60_000 })
+  if (!rl.ok) {
+    return NextResponse.json(
+      { error: 'Trop de générations en peu de temps', retryAfterSec: rl.retryAfterSec },
+      { status: 429, headers: { 'Retry-After': String(rl.retryAfterSec) } },
+    )
+  }
 
   const meeting = await prisma.meeting.findFirst({
     where: {

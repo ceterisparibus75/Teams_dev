@@ -89,7 +89,7 @@ La génération PV (transcription Graph + appel Claude) est exécutée par **Inn
 
 - **`auth.ts`** — Configuration NextAuth + Azure AD ; callbacks `jwt()` (upsert user, stocke tokens) et `session()` (enrichit session) ; refresh token automatique
 - **`microsoft-graph.ts`** — Token app-only (client credentials MSAL), token délégué (refresh), récupération réunions Outlook, transcription VTT Teams, envoi email Graph
-- **`azure-openai.ts`** — Génération PV via Claude Opus (`claude-opus-4-7`) avec `tool_use` ("generer_pv") ; prompts calibrés procédures judiciaires BL&Associés ; validation Zod ; audit log en BD
+- **`claude-generator.ts`** — Génération PV via Claude Opus (`claude-opus-4-7`) avec `tool_use` ("generer_pv") ; prompts calibrés procédures judiciaires BL&Associés ; validation Zod ; audit log en BD
 - **`docx-generator.ts`** — Export Word avec lib `docx` ; personnalisation via Template (logo base64, polices, couleurs, marges)
 - **`email-sender.ts`** — Envoi email avec pièce jointe DOCX via `/me/sendMail` Graph API
 - **`openai-transcription.ts`** — Transcription audio via OpenAI Whisper (whisper-1, fr, max 25 MB)
@@ -186,11 +186,11 @@ BOT_DISPLAY           # Display Xvfb (défaut: :99, Linux seulement)
 BOT_AUDIO_DIR         # Dossier audio temporaire (défaut: /tmp/bot-audio)
 ```
 
-**ATTENTION** : `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_DEPLOYMENT` sont dans `.env.example` mais **jamais utilisés** dans le code — l'app utilise Claude via `@anthropic-ai/sdk` (pas Azure OpenAI).
+**Note** : malgré l'ancien nommage `azure-openai.ts` (renommé `claude-generator.ts`), l'app n'a jamais utilisé Azure OpenAI — uniquement Claude via `@anthropic-ai/sdk`. Aucune variable `AZURE_OPENAI_*` n'est requise.
 
 ### Génération IA
 
-`src/lib/azure-openai.ts` appelle **Claude Opus** (`claude-opus-4-7`) via `@anthropic-ai/sdk` avec le pattern `tool_use` (outil `generer_pv`). La réponse est validée avec Zod (`PvContentSchema`). Les prompts intègrent le domaine juridique BL&Associés (procédures amiables, collectives, finance en difficulté). Toujours en français, aucune donnée inventée.
+`src/lib/claude-generator.ts` appelle **Claude Opus** (`claude-opus-4-7`) via `@anthropic-ai/sdk` avec le pattern `tool_use` (outil `generer_pv`). La réponse est validée avec Zod (`PvContentSchema`). Les prompts intègrent le domaine juridique BL&Associés (procédures amiables, collectives, finance en difficulté). Toujours en français, aucune donnée inventée.
 
 **Limites :**
 - Transcription tronquée si > 60 000 caractères (50k début + 10k fin)
@@ -213,7 +213,7 @@ BOT_AUDIO_DIR         # Dossier audio temporaire (défaut: /tmp/bot-audio)
 
 ### Points d'attention pour les modifications
 
-1. **Schéma PV** — Toute modification du schéma Zod dans `src/schemas/pv-content.schema.ts` doit être cohérente avec l'outil Claude dans `src/lib/azure-openai.ts`
+1. **Schéma PV** — Toute modification du schéma Zod dans `src/schemas/pv-content.schema.ts` doit être cohérente avec l'outil Claude dans `src/lib/claude-generator.ts`
 2. **Tokens Microsoft** — `microsoft-graph.ts` gère deux types de tokens : app-only (client credentials, pour transcriptions) et délégué (pour calendrier/email utilisateur)
 3. **isGenerating** — Le flag `MeetingMinutes.isGenerating` est désormais piloté par la fonction Inngest `generatePvJob` qui retry automatiquement et écrit le statut final dans tous les cas (success, no_transcription, failure). Côté lecture, `/api/operations` et `/api/minutes/[id]` considèrent un `isGenerating=true` plus vieux que 15 min comme « timed out » et le forcent à false
 4. **Template logo** — Stocké en base64 dans PostgreSQL (`@db.Text`) ; pas de limite de taille imposée — éviter > 2 MB

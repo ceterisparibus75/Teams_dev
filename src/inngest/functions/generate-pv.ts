@@ -1,6 +1,6 @@
 import { NonRetriableError } from 'inngest'
 import { prisma } from '@/lib/prisma'
-import { generateMinutesContent, createSkeletonContent } from '@/lib/azure-openai'
+import { generateMinutesContent, createSkeletonContent } from '@/lib/claude-generator'
 import { getAttendanceLookup, getTranscription } from '@/lib/microsoft-graph'
 import { extractVttDurationMinutes } from '@/lib/utils'
 import { toPrismaJson } from '@/lib/minutes-persist'

@@ -3,10 +3,11 @@ import { getServerSession } from 'next-auth'
 import { z } from 'zod'
 import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
-import { generateMinutesContent } from '@/lib/azure-openai'
+import { generateMinutesContent } from '@/lib/claude-generator'
 import { getAttendanceWarning } from '@/lib/attendance-warning'
 import { getAttendanceLookup, getTranscriptionResult } from '@/lib/microsoft-graph'
 import { toPrismaJson } from '@/lib/minutes-persist'
+import { rateLimit } from '@/lib/rate-limit'
 
 // Seuls les modèles Anthropic sont acceptés ; empêche la substitution vers un
 // autre fournisseur via un body arbitraire.
@@ -96,6 +97,17 @@ export async function POST(
   if (!session?.user?.id) return NextResponse.json({ error: 'Non autorisé' }, { status: 401 })
 
   const { meetingId } = await params
+
+  // Cap : 5 retranscriptions par utilisateur / 5 min — chaque appel relance
+  // Claude en synchrone, donc plus coûteux que /api/generate qui passe par Inngest.
+  const rl = rateLimit({ name: 'retranscribe-pv', key: session.user.id, limit: 5, windowMs: 5 * 60_000 })
+  if (!rl.ok) {
+    return NextResponse.json(
+      { error: 'Trop de retranscriptions en peu de temps', retryAfterSec: rl.retryAfterSec },
+      { status: 429, headers: { 'Retry-After': String(rl.retryAfterSec) } },
+    )
+  }
+
   const rawBody = await req.json().catch(() => ({}))
   const parsed = BodySchema.safeParse(rawBody)
   if (!parsed.success) {
