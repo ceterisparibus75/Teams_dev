@@ -3,6 +3,9 @@ import AzureADProvider from 'next-auth/providers/azure-ad'
 import { prisma } from '@/lib/prisma'
 import { MICROSOFT_AUTHORIZATION_SCOPE } from '@/lib/microsoft-scopes'
 import { encryptToken } from '@/lib/crypto'
+import { logger } from '@/lib/logger'
+
+const log = logger.child({ module: 'auth' })
 
 export const authOptions: NextAuthOptions = {
   providers: [
@@ -54,7 +57,7 @@ export const authOptions: NextAuthOptions = {
             },
           })
         } catch (dbError) {
-          console.error('[auth] Prisma upsert failed:', dbError)
+          log.error({ err: dbError, scope: 'jwt' }, 'Prisma upsert failed')
         }
       }
       return token
@@ -70,7 +73,7 @@ export const authOptions: NextAuthOptions = {
           session.user.role = user.role
         }
       } catch (dbError) {
-        console.error('[auth] session DB lookup failed:', dbError)
+        log.error({ err: dbError, scope: 'session' }, 'session DB lookup failed')
       }
       session.accessToken = token.accessToken as string | undefined
       return session

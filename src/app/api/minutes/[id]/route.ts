@@ -4,6 +4,7 @@ import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { getMinutesQualityAlerts } from '@/lib/minutes-quality'
 import { MinutesPatchSchema, toPrismaJson } from '@/lib/minutes-persist'
+import { logger } from '@/lib/logger'
 import type { MinutesContent } from '@/types'
 
 export async function GET(
@@ -117,7 +118,7 @@ export async function PATCH(
     const qualityAlerts = getMinutesQualityAlerts(updated.content as MinutesContent)
     return NextResponse.json({ ...updated, qualityAlerts })
   } catch (error) {
-    console.error('[minutes/PATCH]', error)
+    logger.error({ err: error, scope: 'minutes/PATCH' }, 'PATCH failed')
     return NextResponse.json({ error: 'Erreur serveur' }, { status: 500 })
   }
 }

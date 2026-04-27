@@ -1,8 +1,11 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { createHash } from 'crypto'
 import { prisma } from '@/lib/prisma'
+import { logger } from '@/lib/logger'
 import { PvContentSchema, type PvContent } from '@/schemas/pv-content.schema'
 import type { MeetingAttendanceLookup, MeetingAttendanceRecord, MinutesContent, PVSection } from '@/types'
+
+const log = logger.child({ module: 'claude-generator' })
 
 // ─── Constantes prompt ────────────────────────────────────────────────────────
 
@@ -747,11 +750,9 @@ export async function generateMinutesContent(
   let status = 'success'
   let errorMessage: string | undefined
 
-  console.log(
-    '[Claude] Génération pour "%s" — transcription: %d chars, modèle: %s',
-    subject,
-    (transcription ?? '').length,
-    model
+  log.info(
+    { subject, transcriptionLength: (transcription ?? '').length, model },
+    'Génération démarrée',
   )
 
   // stream().finalMessage() requis pour les appels potentiellement longs.
@@ -771,31 +772,31 @@ export async function generateMinutesContent(
 
   const extractToolInput = (response: Awaited<ReturnType<typeof callClaude>>, attempt: number) => {
     const blockTypes = response.content.map((b) => b.type).join(', ')
-    console.log(
-      '[Claude] tentative=%d stop_reason=%s tokens_out=%d blocs=[%s]',
-      attempt, response.stop_reason, response.usage.output_tokens, blockTypes
+    log.info(
+      { attempt, stop_reason: response.stop_reason, tokens_out: response.usage.output_tokens, blocs: blockTypes },
+      'Tentative Claude',
     )
 
     const block = response.content.find((b) => b.type === 'tool_use')
     if (!block || block.type !== 'tool_use') {
       lastDiag = `tentative ${attempt} — stop_reason=${response.stop_reason} | aucun bloc tool_use | blocs=[${blockTypes}] | tokens_out=${response.usage.output_tokens}`
-      console.warn('[Claude]', lastDiag)
+      log.warn({ attempt }, lastDiag)
       return null
     }
 
     const input = block.input as Record<string, unknown>
     const keys = Object.keys(input)
-    console.log('[Claude] tentative=%d — %d clé(s): %s', attempt, keys.length, keys.join(', '))
+    log.info({ attempt, keysCount: keys.length, keys }, 'Réponse Claude — clés')
 
     if (keys.length === 0) {
       lastDiag = `tentative ${attempt} — stop_reason=${response.stop_reason} | tool_use présent mais input={} (JSON tronqué ?) | tokens_out=${response.usage.output_tokens}`
-      console.warn('[Claude]', lastDiag)
+      log.warn({ attempt }, lastDiag)
       return null
     }
 
     if (keys.length < 3) {
       lastDiag = `tentative ${attempt} — stop_reason=${response.stop_reason} | input partiel (${keys.length} clé(s): ${keys.join(',')}) | tokens_out=${response.usage.output_tokens}`
-      console.warn('[Claude]', lastDiag)
+      log.warn({ attempt }, lastDiag)
     }
 
     // On accepte tout input non-vide (même partiel) — Zod valide ensuite
@@ -816,7 +817,7 @@ export async function generateMinutesContent(
 
     for (let attempt = 2; !toolInput && attempt <= MAX_TOOL_INPUT_ATTEMPTS; attempt++) {
       const delay = TOOL_INPUT_DELAYS[attempt - 2]
-      console.warn(`[Claude] Input vide (tentative ${attempt - 1}), attente ${delay} ms avant retry...`)
+      log.warn({ previousAttempt: attempt - 1, delayMs: delay }, 'Input vide, retry programmé')
       await new Promise(resolve => setTimeout(resolve, delay))
       response = await callClaudeWithRetry()
       tokensInput += response.usage.input_tokens
@@ -838,19 +839,18 @@ export async function generateMinutesContent(
       if (nested && typeof nested === 'object' && !Array.isArray(nested)) {
         const nestedObj = nested as Record<string, unknown>
         if ('metadata' in nestedObj || 'resume' in nestedObj || 'sections' in nestedObj) {
-          console.log('[Claude] Structure imbriquée détectée sous "%s" — déballage', topKeys[0])
+          log.info({ wrapperKey: topKeys[0] }, 'Structure imbriquée détectée — déballage')
           toolInput = nestedObj
         }
       }
     }
 
     const topLevelKeys = Object.keys(toolInput).join(', ')
-    console.log('[Claude] Clés top-level avant validation Zod : %s', topLevelKeys)
+    log.debug({ topLevelKeys }, 'Clés top-level avant validation Zod')
 
     const validation = PvContentSchema.safeParse(toolInput)
     if (!validation.success) {
-      console.warn('[Claude] Zod validation partielle — clés présentes: %s', topLevelKeys)
-      console.warn('[Claude] Erreurs Zod:', validation.error.flatten())
+      log.warn({ topLevelKeys, zodErrors: validation.error.flatten() }, 'Zod validation partielle')
       const partial = toolInput as Partial<PvContent>
       if (partial.resume && partial.sections?.length) {
         const lenientInput = {
@@ -893,7 +893,7 @@ export async function generateMinutesContent(
   } catch (error) {
     status = 'error'
     errorMessage = error instanceof Error ? error.message : String(error)
-    console.error('[Claude] Generation failed:', error)
+    log.error({ err: error }, 'Generation failed')
     throw error  // On propage l'erreur — ne jamais écraser silencieusement un contenu existant
   } finally {
     if (options?.userId) {
@@ -912,7 +912,7 @@ export async function generateMinutesContent(
           status,
           errorMessage: errorMessage ?? null,
         },
-      }).catch((e) => console.error('[AuditLog] Échec écriture:', e))
+      }).catch((e) => log.error({ err: e, scope: 'AuditLog' }, 'Échec écriture audit log'))
     }
   }
 }

@@ -4,8 +4,11 @@ import { generateMinutesContent, createSkeletonContent } from '@/lib/claude-gene
 import { getAttendanceLookup, getTranscription } from '@/lib/microsoft-graph'
 import { extractVttDurationMinutes } from '@/lib/utils'
 import { toPrismaJson } from '@/lib/minutes-persist'
+import { logger } from '@/lib/logger'
 import { inngest, generatePvRequested } from '@/inngest/client'
 import type { MeetingAttendanceLookup } from '@/types'
+
+const log = logger.child({ module: 'inngest:generate-pv' })
 
 // Pipeline de génération PV : transcription → Claude → persist.
 // Inngest gère retry exponentiel automatique (3 tentatives par défaut)
@@ -74,7 +77,7 @@ export const generatePvJob = inngest.createFunction(
         try {
           return await getTranscription(userId, meeting.joinUrl, { subject: meeting.subject })
         } catch (err) {
-          console.warn('[inngest:generate-pv] getTranscription failed', err)
+          log.warn({ err, scope: 'fetch-transcription' }, 'getTranscription failed')
           return null
         }
       })
@@ -110,7 +113,7 @@ export const generatePvJob = inngest.createFunction(
       try {
         return (await getAttendanceLookup(userId, meeting.joinUrl)) ?? null
       } catch (err) {
-        console.warn('[inngest:generate-pv] getAttendanceLookup failed', err)
+        log.warn({ err, scope: 'fetch-attendance' }, 'getAttendanceLookup failed')
         return null
       }
     })

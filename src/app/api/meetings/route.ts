@@ -4,6 +4,7 @@ import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { getRecentMeetings } from '@/lib/microsoft-graph'
 import { refreshMeetingsTranscriptionMetadata } from '@/lib/meeting-transcription-sync'
+import { logger } from '@/lib/logger'
 
 export async function GET(req: NextRequest) {
   const session = await getServerSession(authOptions)
@@ -175,7 +176,7 @@ export async function GET(req: NextRequest) {
       }))
     )
   } catch (error) {
-    console.error('[meetings/GET]', error)
+    logger.error({ err: error, scope: 'meetings/GET' }, 'GET failed')
     return NextResponse.json({ error: 'Erreur serveur' }, { status: 500 })
   }
 }

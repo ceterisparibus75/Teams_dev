@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
+import { logger } from '@/lib/logger'
 
 export async function GET(req: NextRequest) {
   const session = await getServerSession(authOptions)
@@ -58,7 +59,7 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({ minutes, nextCursor })
   } catch (error) {
-    console.error('[minutes/GET]', error)
+    logger.error({ err: error, scope: 'minutes/GET' }, 'GET failed')
     return NextResponse.json({ error: 'Erreur serveur' }, { status: 500 })
   }
 }

@@ -116,6 +116,7 @@ model Meeting {
 
   @@index([dossierId])
   @@index([organizerId])
+  @@index([startDateTime])
 }
 
 model MeetingParticipant {
@@ -125,6 +126,9 @@ model MeetingParticipant {
   name      String
   email     String
   company   String?
+
+  @@index([email])
+  @@index([meetingId])
 }
 
 model MeetingCollaborator {

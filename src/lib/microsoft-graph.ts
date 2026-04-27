@@ -4,7 +4,10 @@ import { prisma } from '@/lib/prisma'
 import { MICROSOFT_GRAPH_SCOPES } from '@/lib/microsoft-scopes'
 import { transcribeMedia } from '@/lib/openai-transcription'
 import { encryptToken, decryptToken } from '@/lib/crypto'
+import { logger } from '@/lib/logger'
 import type { GraphMeeting, MeetingAttendanceLookup, MeetingAttendanceRecord } from '@/types'
+
+const log = logger.child({ module: 'microsoft-graph' })
 
 type AccessTokenResult =
   | { ok: true; accessToken: string; debug?: string }
@@ -302,7 +305,7 @@ async function getAccessTokenResult(userId: string): Promise<AccessTokenResult> 
       debug: buildTokenDebug(result.accessToken),
     }
   } catch (error) {
-    console.error('[getValidAccessToken]', error)
+    log.error({ scope: 'getValidAccessToken', err: error }, 'access token error')
     if (isReauthError(error)) {
       return { ok: false, reason: 'reauth_required', detail: getErrorMessage(error) }
     }
@@ -713,7 +716,7 @@ export async function getRecentMeetings(userId: string): Promise<GraphMeeting[]>
     const events: CalendarEvent[] = result.value ?? []
     return events.filter((ev) => ev.isOnlineMeeting || ev.onlineMeeting?.joinUrl).map(toGraphMeeting)
   } catch (error) {
-    console.error('[getRecentMeetings]', error)
+    log.error({ scope: 'getRecentMeetings', err: error }, 'failed to fetch meetings')
     return []
   }
 }
@@ -738,7 +741,7 @@ export async function getMeetingsEndedInLastHours(
     const events: CalendarEvent[] = result.value ?? []
     return events.filter((ev) => ev.isOnlineMeeting).map(toGraphMeeting)
   } catch (error) {
-    console.error('[getMeetingsEndedInLastHours]', error)
+    log.error({ scope: 'getMeetingsEndedInLastHours', err: error }, 'failed')
     return []
   }
 }
@@ -802,7 +805,7 @@ export async function getAttendanceLookup(
   }
   if (!tokenHasAttendanceArtifactScope(tokenResult.accessToken)) {
     const detail = mergeDebug('Scope OnlineMeetingArtifact.Read.All absent du token utilisateur.', tokenResult.debug)
-    console.warn('[getAttendanceRecords]', detail)
+    log.warn({ scope: 'getAttendanceRecords' }, detail)
     return { status: 'missing_scope', records: [], detail }
   }
 
@@ -815,7 +818,7 @@ export async function getAttendanceLookup(
     )
     if (!onlineMeetingId) {
       const detail = mergeDebug('onlineMeeting introuvable via joinUrl.', tokenResult.debug)
-      console.warn('[getAttendanceRecords]', detail)
+      log.warn({ scope: 'getAttendanceRecords' }, detail)
       return { status: 'meeting_not_found', records: [], detail }
     }
 
@@ -864,9 +867,9 @@ export async function getAttendanceLookup(
       }
     }
 
-    console.warn(
-      '[getAttendanceRecords] Aucun rapport de présence exploitable.',
-      mergeDebug(errors.join(' || '), tokenResult.debug)
+    log.warn(
+      { scope: 'getAttendanceRecords' },
+      `Aucun rapport de présence exploitable. ${mergeDebug(errors.join(' || '), tokenResult.debug)}`,
     )
     const detail = mergeDebug(errors.join(' || '), tokenResult.debug)
     const status = errors.every((entry) => entry.includes('aucun attendanceReport'))
@@ -877,7 +880,7 @@ export async function getAttendanceLookup(
     return { status, records: [], detail }
   } catch (error) {
     const detail = getErrorMessage(error) ?? String(error)
-    console.warn('[getAttendanceRecords] Rapport de présence indisponible:', detail)
+    log.warn({ scope: 'getAttendanceRecords' }, `Rapport de présence indisponible: ${detail}`)
     return { status: 'error', records: [], detail }
   }
 }
@@ -1177,7 +1180,7 @@ export async function getTranscriptionResult(
 
     return { ok: true, transcription }
   } catch (error) {
-    console.error('[getTranscription]', error)
+    log.error({ scope: 'getTranscription', err: error }, 'failed')
     if (isPermissionError(error)) {
       return {
         ok: false,

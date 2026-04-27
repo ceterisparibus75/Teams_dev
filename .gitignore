@@ -48,3 +48,7 @@ next-env.d.ts
 
 # claude code (local settings & session data)
 .claude/
+
+# logs locaux dev
+.next-dev.log
+.next-dev.err.log

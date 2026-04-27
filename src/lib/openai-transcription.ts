@@ -1,3 +1,7 @@
+import { logger } from '@/lib/logger'
+
+const log = logger.child({ module: 'openai-transcription' })
+
 const MAX_TRANSCRIPTION_FILE_SIZE_BYTES = 25 * 1024 * 1024
 
 export interface TranscriptionMediaInput {
@@ -8,18 +12,19 @@ export interface TranscriptionMediaInput {
 
 export async function transcribeMedia(input: TranscriptionMediaInput): Promise<string | null> {
   if (!process.env.OPENAI_API_KEY) {
-    console.warn('[openai-transcription] OPENAI_API_KEY absent')
+    log.warn('OPENAI_API_KEY absent')
     return null
   }
 
   if (input.buffer.byteLength === 0) {
-    console.warn('[openai-transcription] Fichier vide')
+    log.warn('Fichier vide')
     return null
   }
 
   if (input.buffer.byteLength > MAX_TRANSCRIPTION_FILE_SIZE_BYTES) {
-    console.warn(
-      `[openai-transcription] Fichier trop volumineux (${Math.round(input.buffer.byteLength / 1024 / 1024)} MB > 25 MB)`
+    log.warn(
+      { sizeMb: Math.round(input.buffer.byteLength / 1024 / 1024) },
+      'Fichier trop volumineux (> 25 MB)',
     )
     return null
   }
@@ -41,7 +46,7 @@ export async function transcribeMedia(input: TranscriptionMediaInput): Promise<s
 
   if (!response.ok) {
     const errorText = await response.text()
-    console.error('[openai-transcription] Erreur API:', errorText)
+    log.error({ errorText }, 'Erreur API Whisper')
     return null
   }
 

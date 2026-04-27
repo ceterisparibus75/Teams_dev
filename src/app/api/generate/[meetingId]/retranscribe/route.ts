@@ -3,11 +3,12 @@ import { getServerSession } from 'next-auth'
 import { z } from 'zod'
 import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
-import { generateMinutesContent } from '@/lib/claude-generator'
+import { createSkeletonContent } from '@/lib/claude-generator'
 import { getAttendanceWarning } from '@/lib/attendance-warning'
 import { getAttendanceLookup, getTranscriptionResult } from '@/lib/microsoft-graph'
 import { toPrismaJson } from '@/lib/minutes-persist'
 import { rateLimit } from '@/lib/rate-limit'
+import { inngest } from '@/inngest/client'
 
 // Seuls les modèles Anthropic sont acceptés ; empêche la substitution vers un
 // autre fournisseur via un body arbitraire.
@@ -157,37 +158,43 @@ export async function POST(
     data: { hasTranscription: true },
   })
 
-  let content
-  let attendanceWarning
-  try {
-    const attendanceLookup = await getAttendanceLookup(session.user.id, meeting.joinUrl)
-    attendanceWarning = getAttendanceWarning(attendanceLookup)
-    content = await generateMinutesContent(
-      meeting.subject,
-      transcriptResult.transcription,
-      meeting.participants,
-      {
-        userId: session.user.id,
-        minutesId: existingMinutes.id,
-        promptText: customPromptText,
-        modelName: customModelName,
-        meetingDate: meeting.startDateTime ?? undefined,
-        attendanceLookup,
-      }
-    )
-  } catch (genError) {
-    const msg = genError instanceof Error ? genError.message : 'Erreur inconnue'
-    console.error('[retranscribe] Claude generation failed:', genError)
-    return NextResponse.json(
-      { error: `La génération Claude a échoué : ${msg}`, code: 'generation_error' },
-      { status: 502 }
-    )
-  }
+  // Attendance lookup en sync : 1 appel Graph rapide, permet d'avertir tout
+  // de suite l'utilisateur si le scope manque.
+  const attendanceLookup = await getAttendanceLookup(session.user.id, meeting.joinUrl)
+  const attendanceWarning = getAttendanceWarning(attendanceLookup)
 
+  // Marque le PV comme "en cours de régénération" : le squelette + flag
+  // _generating sont visibles immédiatement côté UI.
+  const skeleton = createSkeletonContent(meeting.subject, meeting.participants, meeting.startDateTime)
   await prisma.meetingMinutes.update({
     where: { meetingId },
-    data: { content: toPrismaJson(content as object) },
+    data: {
+      isGenerating: true,
+      content: toPrismaJson({
+        ...(skeleton as object),
+        _generating: true,
+        _generatingStartedAt: new Date().toISOString(),
+      }),
+    },
   })
 
-  return NextResponse.json({ ok: true, minutesId: existingMinutes.id, attendanceWarning })
+  // Envoi à Inngest : retry/backoff/observabilité gérés par la queue.
+  // On passe la transcription déjà fetchée pour que le job ne refasse pas
+  // l'appel Graph.
+  await inngest.send({
+    name: 'pv/generate.requested',
+    data: {
+      meetingId,
+      userId: session.user.id,
+      source: 'retranscribe',
+      transcript: transcriptResult.transcription,
+      promptText: customPromptText,
+      modelName: customModelName,
+    },
+  })
+
+  return NextResponse.json(
+    { ok: true, minutesId: existingMinutes.id, generating: true, attendanceWarning },
+    { status: 202 },
+  )
 }

@@ -6,6 +6,9 @@ import { getAttendanceWarning } from '@/lib/attendance-warning'
 import { getAttendanceLookup } from '@/lib/microsoft-graph'
 import { safeEqual } from '@/lib/secrets'
 import { toPrismaJson } from '@/lib/minutes-persist'
+import { logger } from '@/lib/logger'
+
+const log = logger.child({ module: 'bot-generate' })
 
 const MAX_TRANSCRIPT_CHARS = 500_000
 const BodySchema = z.object({
@@ -67,7 +70,7 @@ export async function POST(
   const defaultTemplate = await prisma.template.findFirst({ where: { isDefault: true } })
   const attendanceLookup = await getAttendanceLookup(meeting.organizerId, meeting.joinUrl)
   const attendanceWarning = getAttendanceWarning(attendanceLookup)
-  if (attendanceWarning) console.warn('[bot-generate] Attendance warning:', attendanceWarning)
+  if (attendanceWarning) log.warn({ meetingId, attendanceWarning }, 'Attendance warning')
   const content = await generateMinutesContent(
     meeting.subject,
     transcript,
@@ -80,13 +83,13 @@ export async function POST(
     if (transcript) {
       await prisma.meetingMinutes.update({
         where: { meetingId },
-        data: { content: content as unknown as import('@prisma/client').Prisma.InputJsonValue },
+        data: { content: toPrismaJson(content as object) },
       })
       await prisma.meeting.update({
         where: { id: meetingId },
         data: { hasTranscription: true },
       })
-      console.log(`[bot-generate] Compte rendu mis à jour avec transcription pour "${meeting.subject}"`)
+      log.info({ meetingId, subject: meeting.subject }, 'Compte rendu mis à jour avec transcription')
       return NextResponse.json({ ok: true, updated: true, attendanceWarning })
     }
     return NextResponse.json({ ok: true, alreadyExists: true, attendanceWarning })
@@ -102,6 +105,6 @@ export async function POST(
     },
   })
 
-  console.log(`[bot-generate] Compte rendu créé pour "${meeting.subject}"`)
+  log.info({ meetingId, subject: meeting.subject }, 'Compte rendu créé')
   return NextResponse.json({ ok: true, attendanceWarning })
 }

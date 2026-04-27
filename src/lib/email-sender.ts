@@ -1,6 +1,9 @@
 import { getValidAccessToken } from '@/lib/microsoft-graph'
 import { Client } from '@microsoft/microsoft-graph-client'
+import { logger } from '@/lib/logger'
 import type { MinutesContent } from '@/types'
+
+const log = logger.child({ module: 'email-sender' })
 
 export interface SendMinutesParams {
   userId: string
@@ -72,7 +75,7 @@ export async function sendMinutesEmail(params: SendMinutesParams): Promise<boole
     await client.api('/me/sendMail').post({ message, saveToSentItems: true })
     return true
   } catch (error) {
-    console.error('[Email Sender] Failed:', error)
+    log.error({ err: error }, 'sendMail failed')
     return false
   }
 }
