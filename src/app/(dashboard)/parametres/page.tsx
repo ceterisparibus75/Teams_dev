@@ -1,27 +1,22 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
+import useSWR from 'swr'
 import { Plus, Star, Pencil, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button, Card, CardContent } from '@/components/ui'
 import { TemplateEditor, type TemplateFormData } from '@/components/templates/TemplateEditor'
+import { jsonFetcher } from '@/lib/swr'
 
 export default function ParametresPage() {
-  const [templates, setTemplates] = useState<TemplateFormData[]>([])
+  const { data: templates = [], mutate } = useSWR<TemplateFormData[]>('/api/templates', jsonFetcher)
   const [editing, setEditing] = useState<TemplateFormData | null>(null)
   const [creating, setCreating] = useState(false)
-
-  async function load() {
-    const data = await fetch('/api/templates').then((r) => r.json())
-    setTemplates(Array.isArray(data) ? data : [])
-  }
-
-  useEffect(() => { load() }, [])
 
   async function handleDelete(id: string) {
     if (!confirm('Supprimer ce template ?')) return
     await fetch(`/api/templates/${id}`, { method: 'DELETE' })
     toast.success('Template supprimé')
-    load()
+    mutate()
   }
 
   if (creating || editing) {
@@ -34,7 +29,7 @@ export default function ParametresPage() {
           <CardContent className="p-6">
             <TemplateEditor
               initial={editing ?? undefined}
-              onSaved={() => { setCreating(false); setEditing(null); load() }}
+              onSaved={() => { setCreating(false); setEditing(null); mutate() }}
               onCancel={() => { setCreating(false); setEditing(null) }}
             />
           </CardContent>

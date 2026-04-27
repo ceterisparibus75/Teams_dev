@@ -1,9 +1,10 @@
 'use client'
 
 import Link from 'next/link'
-import { useEffect, useState } from 'react'
+import useSWR from 'swr'
 import { AlertTriangle, CheckCircle2, Clock3, Loader2, RefreshCw, RotateCcw } from 'lucide-react'
 import { Badge } from '@/components/ui'
+import { jsonFetcher } from '@/lib/swr'
 import { formatDateTime } from '@/lib/utils'
 
 type OperationState = 'ready' | 'processing' | 'failed' | 'blocked' | 'pending'
@@ -71,36 +72,16 @@ function StateIcon({ state }: { state: OperationState }) {
 }
 
 export default function OperationsPage() {
-  const [payload, setPayload] = useState<OperationsPayload | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [refreshing, setRefreshing] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const { data: payload, error: fetchError, isValidating, mutate } = useSWR<OperationsPayload>(
+    '/api/operations',
+    jsonFetcher,
+    { refreshInterval: 20_000, revalidateOnFocus: true },
+  )
 
-  async function load({ silent = false } = {}) {
-    if (silent) setRefreshing(true)
-    else setLoading(true)
-    try {
-      const res = await fetch('/api/operations', { cache: 'no-store' })
-      const data = await res.json()
-      if (!res.ok) {
-        setError(data.error ?? 'Impossible de charger le suivi des traitements.')
-        return
-      }
-      setPayload(data as OperationsPayload)
-      setError(null)
-    } catch {
-      setError('Impossible de charger le suivi des traitements.')
-    } finally {
-      setLoading(false)
-      setRefreshing(false)
-    }
-  }
-
-  useEffect(() => {
-    load()
-    const timer = setInterval(() => load({ silent: true }), 20_000)
-    return () => clearInterval(timer)
-  }, [])
+  const loading = !payload && !fetchError
+  const refreshing = isValidating
+  const error = fetchError ? (fetchError instanceof Error ? fetchError.message : 'Impossible de charger le suivi des traitements.') : null
+  const reload = () => mutate()
 
   const metrics: Array<{ key: keyof OperationsPayload['summary']; label: string }> = [
     { key: 'detected', label: 'Réunions détectées' },
@@ -122,7 +103,7 @@ export default function OperationsPage() {
           </p>
         </div>
         <button
-          onClick={() => load({ silent: true })}
+          onClick={reload}
           disabled={refreshing}
           className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
         >

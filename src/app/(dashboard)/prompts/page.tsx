@@ -1,9 +1,11 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
+import useSWR from 'swr'
 import { Plus, Pencil, Trash2, CheckCircle, Circle } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button, Card, CardContent, Badge } from '@/components/ui'
 import { PromptEditor, type PromptFormData } from '@/components/prompts/PromptEditor'
+import { jsonFetcher } from '@/lib/swr'
 
 interface PromptData extends PromptFormData {
   id: string
@@ -13,22 +15,15 @@ interface PromptData extends PromptFormData {
 }
 
 export default function PromptsPage() {
-  const [prompts, setPrompts] = useState<PromptData[]>([])
+  const { data: prompts = [], mutate } = useSWR<PromptData[]>('/api/prompts', jsonFetcher)
   const [editing, setEditing] = useState<PromptData | null>(null)
   const [creating, setCreating] = useState(false)
-
-  async function load() {
-    const data = await fetch('/api/prompts').then((r) => r.json())
-    setPrompts(Array.isArray(data) ? data : [])
-  }
-
-  useEffect(() => { load() }, [])
 
   async function handleDelete(id: string, nom: string) {
     if (!confirm(`Supprimer le prompt « ${nom} » ?`)) return
     await fetch(`/api/prompts/${id}`, { method: 'DELETE' })
     toast.success('Prompt supprimé')
-    load()
+    mutate()
   }
 
   async function handleToggleActive(p: PromptData) {
@@ -37,7 +32,7 @@ export default function PromptsPage() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ isActive: !p.isActive }),
     })
-    load()
+    mutate()
   }
 
   if (creating || editing) {
@@ -50,7 +45,7 @@ export default function PromptsPage() {
           <CardContent className="p-6">
             <PromptEditor
               initial={editing ?? undefined}
-              onSaved={() => { setCreating(false); setEditing(null); load() }}
+              onSaved={() => { setCreating(false); setEditing(null); mutate() }}
               onCancel={() => { setCreating(false); setEditing(null) }}
             />
           </CardContent>

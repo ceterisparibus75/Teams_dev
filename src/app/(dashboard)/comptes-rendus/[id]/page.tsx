@@ -207,18 +207,21 @@ export default function MinutesDetailPage() {
     return () => clearTimeout(timer)
   }, [content, save])
 
+  // Compteur d'écoulement : démarre quand `regenerating=true`, s'arrête sinon.
+  // setElapsed(0) est appelé côté handler (avant setRegenerating(true)) pour
+  // éviter un setState synchrone dans un effet (react-hooks/set-state-in-effect).
   useEffect(() => {
-    if (regenerating) {
-      setElapsed(0)
-      timerRef.current = setInterval(() => setElapsed((s) => s + 1), 1000)
-    } else {
+    if (!regenerating) {
       if (timerRef.current) clearInterval(timerRef.current)
+      return
     }
+    timerRef.current = setInterval(() => setElapsed((s) => s + 1), 1000)
     return () => { if (timerRef.current) clearInterval(timerRef.current) }
   }, [regenerating])
 
   async function handleRegenerate(useCustomParams = false) {
     if (!data) return
+    setElapsed(0)
     setRegenerating(true)
     try {
       const body: Record<string, string> = {}

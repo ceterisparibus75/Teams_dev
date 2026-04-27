@@ -1,10 +1,12 @@
 'use client'
 import Link from 'next/link'
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import useSWR from 'swr'
 import { toast } from 'sonner'
 import { useRouter } from 'next/navigation'
 import { AlertTriangle, CheckCircle2, FileText, FolderOpen, Loader2, Video } from 'lucide-react'
 import { MeetingCard } from '@/components/meetings/MeetingCard'
+import { jsonFetcher } from '@/lib/swr'
 import type { AttendanceWarning } from '@/lib/attendance-warning'
 import type { MeetingPlatform, BotStatus } from '@prisma/client'
 
@@ -37,79 +39,44 @@ interface OperationsSummary {
 
 export default function DashboardPage() {
   const router = useRouter()
-  const [meetings, setMeetings] = useState<MeetingData[]>([])
-  const [operationsSummary, setOperationsSummary] = useState<OperationsSummary | null>(null)
-  const [loading, setLoading] = useState(true)
   const [generating, setGenerating] = useState<string | null>(null)
-  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  // Polling adaptatif : 15 s si au moins un PV est en cours, sinon revalidation au focus
+  const { data: meetingsData, isLoading } = useSWR<MeetingData[]>(
+    '/api/meetings',
+    jsonFetcher,
+    {
+      refreshInterval: (latest) => (latest?.some((m) => m.minutes?.generating) ? 15_000 : 0),
+    },
+  )
+  // useMemo : éviter de recréer une référence array différente à chaque render
+  // (sinon le useEffect plus bas se réabonne et émet des toasts en double).
+  const meetings = useMemo(() => meetingsData ?? [], [meetingsData])
+  const loading = isLoading
+
+  const { data: operationsData } = useSWR<{ summary: OperationsSummary }>(
+    '/api/operations',
+    jsonFetcher,
+    { refreshInterval: 30_000 },
+  )
+  const operationsSummary = operationsData?.summary
+
+  // Détecte les transitions "encore en génération" → "terminé" pour toaster une seule fois
   const prevGeneratingIds = useRef<Set<string>>(new Set())
-
-  async function loadMeetings() {
-    try {
-      const r = await fetch('/api/meetings')
-      const data = await r.json()
-      if (Array.isArray(data)) setMeetings(data)
-      return Array.isArray(data) ? (data as MeetingData[]) : []
-    } catch {
-      return []
-    }
-  }
-
-  async function loadOperationsSummary() {
-    try {
-      const r = await fetch('/api/operations', { cache: 'no-store' })
-      const data = await r.json()
-      if (r.ok && data?.summary) setOperationsSummary(data.summary as OperationsSummary)
-    } catch {
-      // La page reste utilisable avec les données réunions seules.
-    }
-  }
-
   useEffect(() => {
-    // Meetings : affichage immédiat dès que la réponse arrive
-    loadMeetings().finally(() => setLoading(false))
-    // Operations : se charge en fond, met à jour le résumé quand disponible
-    loadOperationsSummary()
-  }, [])
-
-  // Polling toutes les 15 s si au moins un CR est en cours de génération
-  useEffect(() => {
-    const generatingMeetings = meetings.filter((m) => m.minutes?.generating)
-    if (generatingMeetings.length === 0) {
-      if (pollingRef.current) {
-        clearInterval(pollingRef.current)
-        pollingRef.current = null
+    const stillGenerating = new Set<string>()
+    for (const m of meetings) {
+      if (m.minutes?.generating) {
+        stillGenerating.add(m.id)
+        continue
       }
-      prevGeneratingIds.current = new Set()
-      return
-    }
-
-    prevGeneratingIds.current = new Set(generatingMeetings.map((m) => m.id))
-
-    if (pollingRef.current) return // déjà en cours
-
-    pollingRef.current = setInterval(async () => {
-      const updated = await loadMeetings()
-      const stillGenerating = updated.filter((m) => m.minutes?.generating)
-
-      // Notifier les réunions dont la génération vient de se terminer
-      for (const id of prevGeneratingIds.current) {
-        const m = updated.find((u) => u.id === id)
-        if (m && m.minutes && !m.minutes.generating) {
-          toast.success(`Compte rendu prêt — ${m.subject}`, {
-            action: { label: 'Ouvrir', onClick: () => router.push(`/comptes-rendus/${m.minutes!.id}`) },
-          })
-        }
-      }
-      prevGeneratingIds.current = new Set(stillGenerating.map((m) => m.id))
-    }, 15_000)
-
-    return () => {
-      if (pollingRef.current) {
-        clearInterval(pollingRef.current)
-        pollingRef.current = null
+      if (prevGeneratingIds.current.has(m.id) && m.minutes && !m.minutes.generating) {
+        toast.success(`Compte rendu prêt — ${m.subject}`, {
+          action: { label: 'Ouvrir', onClick: () => router.push(`/comptes-rendus/${m.minutes!.id}`) },
+        })
       }
     }
+    prevGeneratingIds.current = stillGenerating
   }, [meetings, router])
 
   const generatingMeetings = meetings.filter((m) => m.minutes?.generating)

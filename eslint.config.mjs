@@ -1,6 +1,6 @@
 import nextConfig from 'eslint-config-next'
 
-export default [
+const config = [
   ...nextConfig,
   {
     ignores: ['bot/**', 'coverage/**', '__tests__/**', 'prisma/seed.ts'],
@@ -25,3 +25,5 @@ export default [
     },
   },
 ]
+
+export default config

@@ -1,10 +1,12 @@
 'use client'
 import { useEffect, useState } from 'react'
+import useSWR from 'swr'
 import { useParams, useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { ArrowLeft, Link2, Unlink, FileText, ExternalLink, Loader2 } from 'lucide-react'
 import Link from 'next/link'
 import { Badge } from '@/components/ui'
+import { jsonFetcher } from '@/lib/swr'
 import { formatDateTime } from '@/lib/utils'
 import type { AttendanceWarning } from '@/lib/attendance-warning'
 import type { TypeProcedure, StatutDossier } from '@prisma/client'
@@ -86,33 +88,32 @@ interface GenerateResponse {
 export default function DossierDetailPage() {
   const { id } = useParams<{ id: string }>()
   const router = useRouter()
-  const [dossier, setDossier] = useState<DossierData | null>(null)
-  const [freeMeetings, setFreeMeetings] = useState<FreeMeeting[]>([])
   const [showLinkPanel, setShowLinkPanel] = useState(false)
-  const [loading, setLoading] = useState(true)
   const [updatingStatut, setUpdatingStatut] = useState(false)
   const [linkingId, setLinkingId] = useState<string | null>(null)
   const [unlinkingId, setUnlinkingId] = useState<string | null>(null)
   const [generatingId, setGeneratingId] = useState<string | null>(null)
 
-  async function load() {
-    const res = await fetch(`/api/dossiers/${id}`)
-    if (!res.ok) { router.push('/dossiers'); return }
-    const data: DossierData = await res.json()
-    setDossier(data)
-    setLoading(false)
-  }
+  const {
+    data: dossier,
+    error: dossierError,
+    isLoading: loading,
+    mutate: reloadDossier,
+  } = useSWR<DossierData>(id ? `/api/dossiers/${id}` : null, jsonFetcher)
 
-  useEffect(() => { load() }, [id]) // eslint-disable-line react-hooks/exhaustive-deps
+  const { data: freeMeetingsData = [] } = useSWR<FreeMeeting[]>(
+    showLinkPanel ? '/api/meetings?unlinked=1' : null,
+    jsonFetcher,
+  )
+  const freeMeetings = Array.isArray(freeMeetingsData) ? freeMeetingsData : []
 
-  async function loadFreeMeetings() {
-    const res = await fetch('/api/meetings?unlinked=1')
-    if (res.ok) {
-      const data = await res.json()
-      setFreeMeetings(Array.isArray(data) ? data : [])
-    }
-    setShowLinkPanel(true)
-  }
+  // Redirige vers la liste si le dossier est introuvable (404).
+  useEffect(() => {
+    if (dossierError) router.push('/dossiers')
+  }, [dossierError, router])
+
+  const load = () => reloadDossier()
+  const loadFreeMeetings = () => setShowLinkPanel(true)
 
   async function handleStatutChange(statut: StatutDossier) {
     setUpdatingStatut(true)
@@ -122,7 +123,7 @@ export default function DossierDetailPage() {
       body: JSON.stringify({ statut }),
     })
     if (res.ok) {
-      setDossier((prev) => prev ? { ...prev, statut } : prev)
+      reloadDossier((prev) => (prev ? { ...prev, statut } : prev), { revalidate: false })
       toast.success('Statut mis à jour')
     } else {
       toast.error('Erreur lors de la mise à jour')

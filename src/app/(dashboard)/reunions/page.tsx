@@ -1,8 +1,10 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
+import useSWR from 'swr'
 import { toast } from 'sonner'
 import { useRouter } from 'next/navigation'
 import { MeetingCard } from '@/components/meetings/MeetingCard'
+import { jsonFetcher } from '@/lib/swr'
 import type { AttendanceWarning } from '@/lib/attendance-warning'
 import type { MeetingPlatform, BotStatus } from '@prisma/client'
 
@@ -27,40 +29,24 @@ interface GenerateResponse {
 
 export default function ReunionsPage() {
   const router = useRouter()
-  const [meetings, setMeetings] = useState<MeetingData[]>([])
-  const [loading, setLoading] = useState(true)
   const [generating, setGenerating] = useState<string | null>(null)
   const [triggeringBot, setTriggeringBot] = useState<string | null>(null)
 
-  useEffect(() => {
-    fetch('/api/meetings')
-      .then((r) => r.json())
-      .then((data) => {
-        setMeetings(Array.isArray(data) ? data : [])
-        setLoading(false)
-      })
-      .catch((err) => {
-        console.error('[reunions] fetch error:', err)
-        setLoading(false)
-      })
-  }, [])
-
-  // Refresh bot status every 30 s while a bot is active
-  useEffect(() => {
-    const hasBotActive = meetings.some(
-      (m) => m.botStatus === 'JOINING' || m.botStatus === 'IN_MEETING' || m.botStatus === 'PROCESSING'
-    )
-    if (!hasBotActive) return
-
-    const interval = setInterval(() => {
-      fetch('/api/meetings')
-        .then((r) => r.json())
-        .then((data) => { if (Array.isArray(data)) setMeetings(data) })
-        .catch(() => {})
-    }, 30_000)
-
-    return () => clearInterval(interval)
-  }, [meetings])
+  // Polling 30 s tant qu'un bot est actif (joining / in_meeting / processing)
+  const { data: meetingsData, isLoading, mutate } = useSWR<MeetingData[]>(
+    '/api/meetings',
+    jsonFetcher,
+    {
+      refreshInterval: (latest) =>
+        latest?.some(
+          (m) => m.botStatus === 'JOINING' || m.botStatus === 'IN_MEETING' || m.botStatus === 'PROCESSING',
+        )
+          ? 30_000
+          : 0,
+    },
+  )
+  const meetings = meetingsData ?? []
+  const loading = isLoading
 
   async function handleGenerate(meetingId: string) {
     setGenerating(meetingId)
@@ -104,9 +90,11 @@ export default function ReunionsPage() {
         return
       }
       toast.success('Bot envoyé — il rejoindra la réunion dans quelques instants')
-      // Optimistically update UI
-      setMeetings((prev) =>
-        prev.map((m) => m.id === meetingId ? { ...m, botStatus: 'SCHEDULED' as BotStatus } : m)
+      // Optimistic update : SWR mute la cache locale
+      mutate(
+        (current) =>
+          current?.map((m) => (m.id === meetingId ? { ...m, botStatus: 'SCHEDULED' as BotStatus } : m)),
+        { revalidate: false },
       )
     } finally {
       setTriggeringBot(null)
