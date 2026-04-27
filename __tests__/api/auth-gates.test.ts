@@ -64,7 +64,7 @@ describe('Auth gates — 401 sans session', () => {
 
   it('GET /api/templates', async () => {
     const { GET } = await import('@/app/api/templates/route')
-    const res = await GET()
+    const res = await GET(jsonRequest('http://localhost/api/templates'))
     expect(res.status).toBe(401)
   })
 

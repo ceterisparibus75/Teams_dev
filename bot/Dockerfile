@@ -57,6 +57,21 @@ RUN npx prisma generate
 COPY bot/docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh
 
+# ── Hardening : utilisateur non-root + ownership ────────────────────────────
+# Playwright + Xvfb + PulseAudio acceptent un user non-root tant que /tmp/pulse
+# et /tmp/bot-audio sont writables. On crée un user dédié `bot`.
+RUN groupadd --system --gid 1001 bot \
+  && useradd --system --uid 1001 --gid bot --shell /bin/bash --create-home bot \
+  && mkdir -p /tmp/bot-audio /tmp/pulse \
+  && chown -R bot:bot /app /tmp/bot-audio /tmp/pulse \
+  && chmod 755 /tmp/pulse
+
+USER bot
+
+# Healthcheck : ping l'endpoint /health interne du service Express toutes les 30s
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD curl -fsS http://localhost:3001/health || exit 1
+
 EXPOSE 3001
 
 ENTRYPOINT ["/docker-entrypoint.sh"]

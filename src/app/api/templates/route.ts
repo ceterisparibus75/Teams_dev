@@ -4,10 +4,18 @@ import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { TemplateUpsertSchema } from '@/schemas/template.schema'
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   const session = await getServerSession(authOptions)
   if (!session?.user?.id) return NextResponse.json({ error: 'Non autorisé' }, { status: 401 })
-  const templates = await prisma.template.findMany({ orderBy: { createdAt: 'asc' } })
+
+  // ?activeOnly=1 : retourne uniquement les templates utilisables
+  // (utile pour le selector lors de l'envoi d'un PV).
+  const activeOnly = req.nextUrl.searchParams.get('activeOnly') === '1'
+
+  const templates = await prisma.template.findMany({
+    where: activeOnly ? { isActive: true } : undefined,
+    orderBy: [{ isDefault: 'desc' }, { createdAt: 'asc' }],
+  })
   return NextResponse.json(templates)
 }
 
