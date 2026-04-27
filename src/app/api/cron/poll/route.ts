@@ -4,6 +4,10 @@ import { getMeetingsEndedInLastHours } from '@/lib/microsoft-graph'
 import { safeBearerEqual } from '@/lib/secrets'
 import { inngest } from '@/inngest/client'
 
+// Itération sur N utilisateurs × Graph API pour chacun. Avec 10 utilisateurs
+// la durée typique est ~10-20s ; on monte à 60s pour absorber un Graph lent.
+export const maxDuration = 60
+
 // Cooldown persisté en BD — survit aux cold starts lambda et aux redémarrages.
 // Vercel Cron tourne toutes les 2h — cooldown 90 min laisse une marge confortable.
 const COOLDOWN_MS = 90 * 60_000 // 90 minutes

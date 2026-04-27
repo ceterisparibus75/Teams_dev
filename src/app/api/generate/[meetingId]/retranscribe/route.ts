@@ -10,6 +10,11 @@ import { toPrismaJson } from '@/lib/minutes-persist'
 import { rateLimit } from '@/lib/rate-limit'
 import { inngest } from '@/inngest/client'
 
+// Plan Pro Vercel : 300s max, défaut 10s. La récupération de transcription
+// Graph (transcript_id puis content VTT) peut prendre ~10-20s. La génération
+// Claude est ensuite déléguée à Inngest, donc 60s suffisent largement.
+export const maxDuration = 60
+
 // Seuls les modèles Anthropic sont acceptés ; empêche la substitution vers un
 // autre fournisseur via un body arbitraire.
 const BodySchema = z.object({
