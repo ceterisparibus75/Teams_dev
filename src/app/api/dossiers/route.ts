@@ -47,30 +47,27 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Cette référence existe déjà' }, { status: 409 })
   }
 
-  const dossier = await prisma.dossier.create({
-    data: {
-      reference,
-      denomination,
-      typeProcedure,
-      createdById: session.user.id,
-    },
-  })
-
-  // Auto-associe les réunions existantes dont le sujet contient la dénomination
+  // Transaction : la création du dossier et l'auto-link sont atomiques.
+  // Sinon, en cas d'échec de updateMany, on garde un dossier sans réunion liée.
   const denominationLower = denomination.toLowerCase()
-  const matchingMeetings = await prisma.meeting.findMany({
-    where: { dossierId: null },
-    select: { id: true, subject: true },
-  })
-  const toLink = matchingMeetings.filter((m) =>
-    m.subject.toLowerCase().includes(denominationLower)
-  )
-  if (toLink.length > 0) {
-    await prisma.meeting.updateMany({
-      where: { id: { in: toLink.map((m) => m.id) } },
-      data: { dossierId: dossier.id },
+  const { dossier, linkedMeetings } = await prisma.$transaction(async (tx) => {
+    const dossier = await tx.dossier.create({
+      data: { reference, denomination, typeProcedure, createdById: session.user.id },
     })
-  }
 
-  return NextResponse.json({ ...dossier, linkedMeetings: toLink.length }, { status: 201 })
+    const matchingMeetings = await tx.meeting.findMany({
+      where: { dossierId: null },
+      select: { id: true, subject: true },
+    })
+    const toLink = matchingMeetings.filter((m) => m.subject.toLowerCase().includes(denominationLower))
+    if (toLink.length > 0) {
+      await tx.meeting.updateMany({
+        where: { id: { in: toLink.map((m) => m.id) } },
+        data: { dossierId: dossier.id },
+      })
+    }
+    return { dossier, linkedMeetings: toLink.length }
+  })
+
+  return NextResponse.json({ ...dossier, linkedMeetings }, { status: 201 })
 }

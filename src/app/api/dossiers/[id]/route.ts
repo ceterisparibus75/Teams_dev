@@ -1,9 +1,22 @@
 import { NextRequest, NextResponse, after } from 'next/server'
 import { getServerSession } from 'next-auth'
+import { z } from 'zod'
 import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { refreshMeetingsTranscriptionMetadata } from '@/lib/meeting-transcription-sync'
-import type { TypeProcedure, StatutDossier } from '@prisma/client'
+
+const PatchSchema = z
+  .object({
+    reference: z.string().trim().min(1).max(100).optional(),
+    denomination: z.string().trim().min(1).max(255).optional(),
+    typeProcedure: z.enum(['MANDAT_AD_HOC', 'CONCILIATION', 'REDRESSEMENT_JUDICIAIRE', 'SAUVEGARDE']).optional(),
+    statut: z.enum(['EN_COURS', 'CLOS', 'ARCHIVE']).optional(),
+  })
+  .strict()
+  .refine(
+    (b) => b.reference !== undefined || b.denomination !== undefined || b.typeProcedure !== undefined || b.statut !== undefined,
+    { message: 'au moins un champ requis' },
+  )
 
 export async function GET(
   _req: NextRequest,
@@ -69,28 +82,28 @@ export async function PATCH(
   if (!session?.user?.id) return NextResponse.json({ error: 'Non autorisé' }, { status: 401 })
 
   const { id } = await params
-  const body = await req.json() as {
-    reference?: string
-    denomination?: string
-    typeProcedure?: TypeProcedure
-    statut?: StatutDossier
+  const rawBody = await req.json().catch(() => null)
+  const parsed = PatchSchema.safeParse(rawBody)
+  if (!parsed.success) {
+    return NextResponse.json({ error: 'Body invalide', code: 'invalid_body' }, { status: 400 })
   }
+  const body = parsed.data
 
   const existing = await prisma.dossier.findUnique({ where: { id } })
   if (!existing) return NextResponse.json({ error: 'Introuvable' }, { status: 404 })
 
-  if (body.reference && body.reference.trim() !== existing.reference) {
-    const conflict = await prisma.dossier.findUnique({ where: { reference: body.reference.trim() } })
+  if (body.reference && body.reference !== existing.reference) {
+    const conflict = await prisma.dossier.findUnique({ where: { reference: body.reference } })
     if (conflict) return NextResponse.json({ error: 'Cette référence existe déjà' }, { status: 409 })
   }
 
   const updated = await prisma.dossier.update({
     where: { id },
     data: {
-      ...(body.reference    && { reference: body.reference.trim() }),
-      ...(body.denomination && { denomination: body.denomination.trim() }),
-      ...(body.typeProcedure && { typeProcedure: body.typeProcedure }),
-      ...(body.statut        && { statut: body.statut }),
+      ...(body.reference !== undefined && { reference: body.reference }),
+      ...(body.denomination !== undefined && { denomination: body.denomination }),
+      ...(body.typeProcedure !== undefined && { typeProcedure: body.typeProcedure }),
+      ...(body.statut !== undefined && { statut: body.statut }),
     },
   })
 

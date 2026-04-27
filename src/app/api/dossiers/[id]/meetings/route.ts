@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
+import { z } from 'zod'
 import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
+
+const BodySchema = z.object({ meetingId: z.string().min(1).max(255) }).strict()
 
 async function findAccessibleMeeting(meetingId: string, userId: string) {
   return prisma.meeting.findFirst({
@@ -25,9 +28,11 @@ export async function POST(
   if (!session?.user?.id) return NextResponse.json({ error: 'Non autorisé' }, { status: 401 })
 
   const { id } = await params
-  const { meetingId } = await req.json() as { meetingId: string }
-
-  if (!meetingId) return NextResponse.json({ error: 'meetingId manquant' }, { status: 400 })
+  const parsed = BodySchema.safeParse(await req.json().catch(() => null))
+  if (!parsed.success) {
+    return NextResponse.json({ error: 'Body invalide', code: 'invalid_body' }, { status: 400 })
+  }
+  const { meetingId } = parsed.data
 
   const dossier = await prisma.dossier.findUnique({ where: { id } })
   if (!dossier) return NextResponse.json({ error: 'Dossier introuvable' }, { status: 404 })
@@ -48,9 +53,11 @@ export async function DELETE(
   if (!session?.user?.id) return NextResponse.json({ error: 'Non autorisé' }, { status: 401 })
 
   const { id } = await params
-  const { meetingId } = await req.json() as { meetingId: string }
-
-  if (!meetingId) return NextResponse.json({ error: 'meetingId manquant' }, { status: 400 })
+  const parsed = BodySchema.safeParse(await req.json().catch(() => null))
+  if (!parsed.success) {
+    return NextResponse.json({ error: 'Body invalide', code: 'invalid_body' }, { status: 400 })
+  }
+  const { meetingId } = parsed.data
 
   const meeting = await findAccessibleMeeting(meetingId, session.user.id)
   if (!meeting || meeting.dossierId !== id) {
