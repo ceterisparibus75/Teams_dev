@@ -31,7 +31,7 @@ export async function GET(
         ],
       },
     },
-    include: { meeting: { include: { participants: true } }, template: true },
+    include: { meeting: { include: { participants: true, dossier: true } }, template: true },
   })
   if (!minutes) return NextResponse.json({ error: 'Introuvable' }, { status: 404 })
 
@@ -57,12 +57,18 @@ export async function GET(
     template: minutes.template,
   })
 
-  const filename = buildDocxFilename(minutes.meeting.subject, minutes.meeting.startDateTime)
+  // Nom du dossier (majuscule) ; repli sur l'affaire du PV puis l'objet de la réunion
+  const pvMeta = (content as { _pv?: { metadata?: { affaire?: string } } })._pv?.metadata
+  const dossierName = minutes.meeting.dossier?.denomination || pvMeta?.affaire || minutes.meeting.subject
+  const filename = buildDocxFilename(dossierName, minutes.meeting.startDateTime)
+
+  // Content-Disposition : nom accentué → encodage RFC 5987 (filename*) + repli ASCII
+  const asciiName = filename.normalize('NFKD').replace(/\p{M}/gu, '').replace(/[^\x20-\x7E]+/g, '_')
 
   return new NextResponse(docxBuffer as unknown as BodyInit, {
     headers: {
       'Content-Type': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      'Content-Disposition': `attachment; filename="${filename}"`,
+      'Content-Disposition': `attachment; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(filename)}`,
     },
   })
 }

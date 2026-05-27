@@ -1,10 +1,19 @@
 import { buildDocxFilename, buildActionRows } from '@/lib/docx-generator'
 
 describe('buildDocxFilename', () => {
-  it('génère un nom de fichier normalisé', () => {
-    const name = buildDocxFilename('Réunion créanciers', new Date('2026-04-22T10:00:00'))
-    expect(name).toMatch(/^PV_22042026_/)
-    expect(name).toMatch(/\.docx$/)
+  it('format : NOM DU DOSSIER (majuscule)_Réunion du_date', () => {
+    const name = buildDocxFilename('Groupe Bheekaree', new Date('2026-04-22T10:00:00'))
+    expect(name).toBe('GROUPE BHEEKAREE_Réunion du_22 avril 2026.docx')
+  })
+
+  it('met le nom du dossier en majuscule et retire les caractères interdits', () => {
+    const name = buildDocxFilename('Société X / Y', new Date('2026-05-26T10:00:00'))
+    expect(name).toBe('SOCIÉTÉ X Y_Réunion du_26 mai 2026.docx')
+  })
+
+  it('repli sur "DOSSIER" si le nom est vide', () => {
+    const name = buildDocxFilename('', new Date('2026-05-26T10:00:00'))
+    expect(name).toBe('DOSSIER_Réunion du_26 mai 2026.docx')
   })
 })
 

@@ -24,7 +24,6 @@ import { format } from 'date-fns'
 import { fr } from 'date-fns/locale'
 import fs from 'fs'
 import path from 'path'
-import { slugify } from '@/lib/utils'
 import type { MinutesContent, TemplateSection } from '@/types'
 import type { PvContent } from '@/schemas/pv-content.schema'
 
@@ -486,13 +485,13 @@ function renderPVContent(contenu: string, cfg: TemplateConfig): Paragraph[] {
 
 // ─── Exports utilitaires ──────────────────────────────────────────────────────
 
-export function buildDocxFilename(subject: string, date: Date): string {
-  const dateStr = format(date, 'ddMMyyyy')
-  const slug = slugify(subject)
-    .split('-')
-    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-    .join('-')
-  return `PV_${dateStr}_${slug}.docx`
+// Nomenclature : "NOM DU DOSSIER (majuscule)_Réunion du_<date de la réunion>".
+// Ex. : "GROUPE BHEEKAREE_Réunion du_26 mai 2026.docx"
+export function buildDocxFilename(dossierName: string, date: Date): string {
+  const clean = (s: string) => s.replace(/[\\/:*?"<>|]/g, ' ').replace(/\s+/g, ' ').trim()
+  const dossier = clean(dossierName || '').toUpperCase() || 'DOSSIER'
+  const dateStr = format(date, 'dd MMMM yyyy', { locale: fr })
+  return `${dossier}_Réunion du_${dateStr}.docx`
 }
 
 export function buildActionRows(actions: MinutesContent['actions']): [string, string, string][] {

@@ -61,7 +61,7 @@ export async function POST(
         ],
       },
     },
-    include: { meeting: { include: { participants: true } }, template: true },
+    include: { meeting: { include: { participants: true, dossier: true } }, template: true },
   })
   if (!minutes) return NextResponse.json({ error: 'Introuvable' }, { status: 404 })
 
@@ -87,7 +87,10 @@ export async function POST(
     template: minutes.template,
   })
 
-  const filename = buildDocxFilename(minutes.meeting.subject, minutes.meeting.startDateTime)
+  // Nom du dossier (majuscule) ; repli sur l'affaire du PV puis l'objet de la réunion
+  const pvMeta = (content as { _pv?: { metadata?: { affaire?: string } } })._pv?.metadata
+  const dossierName = minutes.meeting.dossier?.denomination || pvMeta?.affaire || minutes.meeting.subject
+  const filename = buildDocxFilename(dossierName, minutes.meeting.startDateTime)
 
   const sent = await sendMinutesEmail({
     userId: session.user.id,
