@@ -669,10 +669,11 @@ export async function generateDocx(params: {
     : `Le ${format(date, 'dd MMMM yyyy', { locale: fr })}\t\t\t\t[ADMINISTRATEUR]`
   const villeText = pvData?.metadata.ville_signature ?? 'PARIS'
 
+  // Signature, date et signataire : même police (et couleur) que le corps du PV
   const signatureBlock: Paragraph[] = [
     empty(400),
-    new Paragraph({ children: [new TextRun({ text: `Fait à ${villeText},`, bold: true, size: hp(cfg.taillePoliceCorps) })] }),
-    new Paragraph({ children: [new TextRun({ text: signataireText, bold: true, size: hp(cfg.taillePoliceCorps) })] }),
+    new Paragraph({ children: [new TextRun({ text: `Fait à ${villeText},`, bold: true, size: hp(cfg.taillePoliceCorps), font: cfg.policeCorps, color: cfg.couleurCorps })] }),
+    new Paragraph({ children: [new TextRun({ text: signataireText, bold: true, size: hp(cfg.taillePoliceCorps), font: cfg.policeCorps, color: cfg.couleurCorps })] }),
   ]
 
   // ── Annexes ───────────────────────────────────────────────────────────────
