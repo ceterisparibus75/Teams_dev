@@ -93,6 +93,10 @@ model Dossier {
 
 model Meeting {
   id               String                @id
+  // Clé stable entre boîtes mail (joinUrl + heure de début). L'id Graph est
+  // propre à chaque mailbox : sans cette clé, chaque membre interne crée un
+  // doublon de la même réunion. Voir src/lib/meeting-sync.ts.
+  dedupKey         String?
   subject          String
   startDateTime    DateTime
   endDateTime      DateTime
@@ -117,6 +121,7 @@ model Meeting {
   @@index([dossierId])
   @@index([organizerId])
   @@index([startDateTime])
+  @@index([dedupKey])
 }
 
 model MeetingParticipant {

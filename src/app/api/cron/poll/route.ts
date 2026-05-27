@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getMeetingsEndedInLastHours } from '@/lib/microsoft-graph'
+import { resolveOrCreateMeeting } from '@/lib/meeting-sync'
 import { safeBearerEqual } from '@/lib/secrets'
 import { inngest } from '@/inngest/client'
 
@@ -37,56 +38,34 @@ export async function GET(req: NextRequest) {
   const events: { name: 'pv/generate.requested'; data: { meetingId: string; userId: string; source: 'cron' } }[] = []
   let dispatched = 0
 
+  // Une même réunion apparaît dans le calendrier de CHAQUE membre interne. Après
+  // résolution dédupliquée, plusieurs (user, gm) pointent vers la même ligne
+  // canonique : on ne traite chaque réunion qu'une fois pour ne pas générer N PV.
+  const seenMeetingIds = new Set<string>()
+
   for (const user of usersWithToken) {
     const meetings = await getMeetingsEndedInLastHours(user.id, 2)
 
     for (const gm of meetings) {
-      const existing = await prisma.meeting.findUnique({
-        where: { id: gm.id },
+      // Résout (ou crée) la réunion canonique + rattache l'utilisateur + accès firm
+      const { meetingId } = await resolveOrCreateMeeting(gm, user.id)
+      if (seenMeetingIds.has(meetingId)) continue
+      seenMeetingIds.add(meetingId)
+
+      const canonical = await prisma.meeting.findUnique({
+        where: { id: meetingId },
         select: { processedAt: true },
       })
-      if (existing?.processedAt) continue
-
-      await prisma.meeting.upsert({
-        where: { id: gm.id },
-        update: {},
-        create: {
-          id: gm.id,
-          subject: gm.subject,
-          startDateTime: new Date(gm.startDateTime),
-          endDateTime: new Date(gm.endDateTime),
-          organizerId: user.id,
-          joinUrl: gm.joinUrl ?? null,
-          participants: {
-            create: gm.attendees.map((a) => ({
-              name: a.emailAddress.name,
-              email: a.emailAddress.address,
-            })),
-          },
-        },
-      })
-
-      // Link firm members (batch)
-      const attendeeEmails = gm.attendees.map((a) => a.emailAddress.address.toLowerCase())
-      const firmMembers = await prisma.user.findMany({
-        where: { email: { in: attendeeEmails } },
-        select: { id: true },
-      })
-      if (firmMembers.length > 0) {
-        await prisma.meetingCollaborator.createMany({
-          data: firmMembers.map((m) => ({ meetingId: gm.id, userId: m.id })),
-          skipDuplicates: true,
-        })
-      }
+      if (canonical?.processedAt) continue
 
       const existingMinutes = await prisma.meetingMinutes.findUnique({
-        where: { meetingId: gm.id },
+        where: { meetingId },
         select: { id: true },
       })
       if (existingMinutes) {
         // Déjà un PV : on marque la réunion traitée et on n'enfile pas de job.
         await prisma.meeting.update({
-          where: { id: gm.id },
+          where: { id: meetingId },
           data: { processedAt: new Date() },
         })
         continue
@@ -94,7 +73,7 @@ export async function GET(req: NextRequest) {
 
       events.push({
         name: 'pv/generate.requested',
-        data: { meetingId: gm.id, userId: user.id, source: 'cron' },
+        data: { meetingId, userId: user.id, source: 'cron' },
       })
       dispatched++
     }

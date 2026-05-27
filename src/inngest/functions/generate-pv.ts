@@ -2,6 +2,7 @@ import { NonRetriableError } from 'inngest'
 import { prisma } from '@/lib/prisma'
 import { generateMinutesContent, createSkeletonContent } from '@/lib/claude-generator'
 import { getAttendanceLookup, getTranscription } from '@/lib/microsoft-graph'
+import { grantFirmMemberAccess } from '@/lib/meeting-access'
 import { extractVttDurationMinutes } from '@/lib/utils'
 import { toPrismaJson } from '@/lib/minutes-persist'
 import { logger } from '@/lib/logger'
@@ -122,6 +123,24 @@ export const generatePvJob = inngest.createFunction(
       }
     })
     const attendanceLookup = (attendanceLookupRaw ?? undefined) as MeetingAttendanceLookup | undefined
+
+    // Partage l'accès à la réunion avec tous les membres de l'étude (@bl-aj.fr)
+    // qui se sont réellement connectés (rapport de présence Teams), en plus des
+    // invités déjà ajoutés au sync. On inclut aussi les participants stockés
+    // pour rattraper les membres inscrits APRÈS le sync initial. Best-effort :
+    // un échec ici ne doit jamais bloquer la génération du PV.
+    await step.run('grant-firm-member-access', async () => {
+      try {
+        const emails = [
+          ...loaded.participants.map((p) => p.email),
+          ...(attendanceLookup?.records.map((r) => r.email) ?? []),
+        ]
+        return await grantFirmMemberAccess(meetingId, emails)
+      } catch (err) {
+        log.warn({ err, scope: 'grant-firm-member-access' }, 'grantFirmMemberAccess failed')
+        return 0
+      }
+    })
 
     try {
       const content = await step.run('claude-generate', () =>

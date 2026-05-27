@@ -4,6 +4,7 @@ import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { getRecentMeetings } from '@/lib/microsoft-graph'
 import { refreshMeetingsTranscriptionMetadata } from '@/lib/meeting-transcription-sync'
+import { resolveOrCreateMeeting } from '@/lib/meeting-sync'
 import { logger } from '@/lib/logger'
 
 export async function GET(req: NextRequest) {
@@ -41,58 +42,14 @@ export async function GET(req: NextRequest) {
       // La table dossier n'est pas encore disponible — on continue sans auto-association
     }
 
-    // Récupère tous les IDs existants en une seule requête
-    const existingIds = new Set(
-      (await prisma.meeting.findMany({
-        where: { id: { in: graphMeetings.map((m) => m.id) } },
-        select: { id: true },
-      })).map((m) => m.id)
-    )
-
-    // Traitement des nouvelles réunions avec batch unique pour les membres du cabinet
-    const newGraphMeetings = graphMeetings.filter((gm) => !existingIds.has(gm.id))
-
-    if (newGraphMeetings.length > 0) {
-      const allEmails = [...new Set(
-        newGraphMeetings.flatMap((gm) => gm.attendees.map((a) => a.emailAddress.address.toLowerCase()))
-      )]
-      const firmMembers = allEmails.length > 0
-        ? await prisma.user.findMany({ where: { email: { in: allEmails } }, select: { id: true, email: true } })
-        : []
-      const emailToUserId = new Map(firmMembers.map((m) => [m.email.toLowerCase(), m.id]))
-
-      for (const gm of newGraphMeetings) {
-        const subjectLower = gm.subject.toLowerCase()
-        const matchedDossier = dossiers.find((d) => subjectLower.includes(d.denomination.toLowerCase()))
-
-        await prisma.meeting.create({
-          data: {
-            id: gm.id,
-            subject: gm.subject,
-            startDateTime: new Date(gm.startDateTime),
-            endDateTime: new Date(gm.endDateTime),
-            organizerId: session.user.id,
-            joinUrl: gm.joinUrl ?? null,
-            dossierId: matchedDossier?.id ?? null,
-            participants: {
-              create: gm.attendees.map((a) => ({
-                name: a.emailAddress.name,
-                email: a.emailAddress.address,
-              })),
-            },
-          },
-        })
-
-        const firmMemberIds = gm.attendees
-          .map((a) => emailToUserId.get(a.emailAddress.address.toLowerCase()))
-          .filter((id): id is string => id !== undefined)
-        if (firmMemberIds.length > 0) {
-          await prisma.meetingCollaborator.createMany({
-            data: firmMemberIds.map((userId) => ({ meetingId: gm.id, userId })),
-            skipDuplicates: true,
-          })
-        }
-      }
+    // Résolution / création dédupliquée : la même réunion synchronisée par
+    // plusieurs membres de l'étude pointe vers UNE seule ligne canonique (clé
+    // stable joinUrl+début). resolveOrCreateMeeting rattache l'utilisateur
+    // courant et donne l'accès aux membres @bl-aj.fr invités.
+    for (const gm of graphMeetings) {
+      const subjectLower = gm.subject.toLowerCase()
+      const matchedDossier = dossiers.find((d) => subjectLower.includes(d.denomination.toLowerCase()))
+      await resolveOrCreateMeeting(gm, session.user.id, { dossierId: matchedDossier?.id ?? null })
     }
 
     // Réunions visibles par cet utilisateur (organisateur OU collaborateur)
