@@ -161,14 +161,18 @@ function dataCell(text: string, cfg: TemplateConfig): TableCell {
 
 // ─── En-tête du document ──────────────────────────────────────────────────────
 
-function buildHeader(cfg: TemplateConfig, logoBuffer: Buffer | null): Header {
+// includeLogo=false : en-tête sans logo, utilisé pour les pages 2+ (le logo ne
+// doit figurer que sur la première page du PV).
+function buildHeader(cfg: TemplateConfig, logoBuffer: Buffer | null, includeLogo = true): Header {
   const children: (Paragraph | Table)[] = []
 
-  // Logo depuis base64 ou fichier public/bl-logo.png par défaut
-  const imageBuffer = logoBuffer ?? (() => {
-    const p = path.join(process.cwd(), 'public', 'bl-logo.png')
-    return fs.existsSync(p) ? fs.readFileSync(p) : null
-  })()
+  // Logo depuis base64 ou fichier public/bl-logo.png par défaut (page 1 uniquement)
+  const imageBuffer = includeLogo
+    ? (logoBuffer ?? (() => {
+        const p = path.join(process.cwd(), 'public', 'bl-logo.png')
+        return fs.existsSync(p) ? fs.readFileSync(p) : null
+      })())
+    : null
 
   const logoWidthPx = Math.round(cfg.logoLargeurCm * 37.795)
   const logoHeightPx = Math.round(logoWidthPx * 100 / 226)  // ratio logo BL & Associés
@@ -221,16 +225,22 @@ function buildHeader(cfg: TemplateConfig, logoBuffer: Buffer | null): Header {
         spacing: { after: 40 },
       }))
     })
-  } else {
-    // Fallback : logo par défaut ou nom du cabinet
+  } else if (imageBuffer) {
+    // Fallback : logo par défaut centré (page 1)
     children.push(new Paragraph({
       alignment: AlignmentType.CENTER,
-      children: imageBuffer
-        ? [new ImageRun({ data: imageBuffer, transformation: { width: logoWidthPx, height: logoHeightPx }, type: 'png' })]
-        : [new TextRun({ text: 'SELAS BL & ASSOCIÉS', bold: true, size: 28 })],
+      children: [new ImageRun({ data: imageBuffer, transformation: { width: logoWidthPx, height: logoHeightPx }, type: 'png' })],
+      spacing: { after: 0 },
+    }))
+  } else if (includeLogo) {
+    // Page 1 sans logo disponible : nom du cabinet en repli
+    children.push(new Paragraph({
+      alignment: AlignmentType.CENTER,
+      children: [new TextRun({ text: 'SELAS BL & ASSOCIÉS', bold: true, size: 28 })],
       spacing: { after: 0 },
     }))
   }
+  // Pages 2+ sans logo ni texte d'en-tête : en-tête vide (children = [])
 
   return new Header({ children })
 }
@@ -494,7 +504,10 @@ export async function generateDocx(params: {
     ? Buffer.from(cfg.logoBase64.replace(/^data:[^;]+;base64,/, ''), 'base64')
     : null
 
-  const header = buildHeader(cfg, logoBuffer)
+  // En-tête page 1 (avec logo) vs pages suivantes (sans logo) : le logo ne doit
+  // figurer que sur la première page du PV.
+  const firstHeader = buildHeader(cfg, logoBuffer, true)
+  const defaultHeader = buildHeader(cfg, logoBuffer, false)
   const footer = buildFooter(cfg)
 
   // ── Bloc titre ────────────────────────────────────────────────────────────
@@ -665,9 +678,13 @@ export async function generateDocx(params: {
 
   const doc = new Document({
     sections: [{
-      headers: { default: header },
-      footers: { default: footer },
+      // titlePage active un en-tête/pied distinct pour la 1re page : on y met le
+      // logo, et l'en-tête `default` (pages 2+) en est dépourvu. Le pied est
+      // identique partout pour conserver la numérotation sur toutes les pages.
+      headers: { first: firstHeader, default: defaultHeader },
+      footers: { first: footer, default: footer },
       properties: {
+        titlePage: true,
         page: {
           margin: {
             top: cm2twip(cfg.margeHautCm),
