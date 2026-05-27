@@ -110,3 +110,78 @@ export async function resolveOrCreateMeeting(
   await grantFirmMemberAccess(gm.id, gm.attendees.map((a) => a.emailAddress.address))
   return { meetingId: gm.id, created: true }
 }
+
+/**
+ * Synchronise en LOT les réunions Graph d'un utilisateur (chemin dashboard).
+ *
+ * Conçu pour tourner en arrière-plan (`after()`) sans marteler la base : le cas
+ * courant (toutes les réunions déjà connues, l'utilisateur a déjà accès) ne
+ * coûte qu'UNE requête de lecture, là où une boucle `resolveOrCreateMeeting`
+ * faisait 3-5 requêtes par réunion.
+ *
+ * - rattache l'utilisateur (collaborateur) aux réunions canoniques où il a accès
+ *   via son calendrier mais n'était pas encore listé ;
+ * - backfill paresseux de `dedupKey` sur les anciennes lignes (anti-doublon
+ *   pour les réunions sans doublon, non couvertes par le merge initial) ;
+ * - crée les réunions réellement nouvelles (rare) via resolveOrCreateMeeting.
+ */
+export async function syncUserMeetings(
+  graphMeetings: GraphMeeting[],
+  userId: string,
+  dossiers: Array<{ id: string; denomination: string }>,
+): Promise<void> {
+  if (graphMeetings.length === 0) return
+
+  const ids = graphMeetings.map((g) => g.id)
+  const keys = graphMeetings
+    .map((g) => computeDedupKey(g))
+    .filter((k): k is string => k !== null)
+
+  // UNE seule lecture pour tout le lot (par id Graph OU clé stable)
+  const existing = await prisma.meeting.findMany({
+    where: { OR: [{ id: { in: ids } }, ...(keys.length ? [{ dedupKey: { in: keys } }] : [])] },
+    select: {
+      id: true,
+      dedupKey: true,
+      organizerId: true,
+      joinUrl: true,
+      startDateTime: true,
+      collaborators: { where: { userId }, select: { userId: true } },
+    },
+  })
+
+  const byKey = new Map(existing.filter((e) => e.dedupKey).map((e) => [e.dedupKey as string, e]))
+  const byId = new Map(existing.map((e) => [e.id, e]))
+
+  const collaboratorAdds: Array<{ meetingId: string; userId: string }> = []
+  const dedupBackfill: Array<{ id: string; dedupKey: string }> = []
+  const toCreate: GraphMeeting[] = []
+
+  for (const gm of graphMeetings) {
+    const key = computeDedupKey(gm)
+    const ex = (key ? byKey.get(key) : undefined) ?? byId.get(gm.id)
+    if (!ex) {
+      toCreate.push(gm)
+      continue
+    }
+    if (ex.organizerId !== userId && ex.collaborators.length === 0) {
+      collaboratorAdds.push({ meetingId: ex.id, userId })
+    }
+    if (!ex.dedupKey) {
+      const k = computeDedupKey(ex)
+      if (k) dedupBackfill.push({ id: ex.id, dedupKey: k })
+    }
+  }
+
+  if (collaboratorAdds.length > 0) {
+    await prisma.meetingCollaborator.createMany({ data: collaboratorAdds, skipDuplicates: true })
+  }
+  for (const { id, dedupKey } of dedupBackfill) {
+    await prisma.meeting.update({ where: { id }, data: { dedupKey } }).catch(() => {})
+  }
+  for (const gm of toCreate) {
+    const subjectLower = gm.subject.toLowerCase()
+    const matchedDossier = dossiers.find((d) => subjectLower.includes(d.denomination.toLowerCase()))
+    await resolveOrCreateMeeting(gm, userId, { dossierId: matchedDossier?.id ?? null }).catch(() => {})
+  }
+}

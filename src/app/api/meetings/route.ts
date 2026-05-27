@@ -4,7 +4,7 @@ import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { getRecentMeetings } from '@/lib/microsoft-graph'
 import { refreshMeetingsTranscriptionMetadata } from '@/lib/meeting-transcription-sync'
-import { resolveOrCreateMeeting } from '@/lib/meeting-sync'
+import { syncUserMeetings } from '@/lib/meeting-sync'
 import { logger } from '@/lib/logger'
 
 export async function GET(req: NextRequest) {
@@ -29,35 +29,18 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const graphMeetings = await getRecentMeetings(session.user.id)
+    const userId = session.user.id
 
-    // Charge tous les dossiers actifs pour l'auto-association (dégradé si indisponible)
-    let dossiers: Array<{ id: string; denomination: string }> = []
-    try {
-      dossiers = await prisma.dossier.findMany({
-        where: { statut: { not: 'ARCHIVE' } },
-        select: { id: true, denomination: true },
-      })
-    } catch {
-      // La table dossier n'est pas encore disponible — on continue sans auto-association
-    }
-
-    // Résolution / création dédupliquée : la même réunion synchronisée par
-    // plusieurs membres de l'étude pointe vers UNE seule ligne canonique (clé
-    // stable joinUrl+début). resolveOrCreateMeeting rattache l'utilisateur
-    // courant et donne l'accès aux membres @bl-aj.fr invités.
-    for (const gm of graphMeetings) {
-      const subjectLower = gm.subject.toLowerCase()
-      const matchedDossier = dossiers.find((d) => subjectLower.includes(d.denomination.toLowerCase()))
-      await resolveOrCreateMeeting(gm, session.user.id, { dossierId: matchedDossier?.id ?? null })
-    }
-
-    // Réunions visibles par cet utilisateur (organisateur OU collaborateur)
+    // CHEMIN RAPIDE : on renvoie la liste depuis la BD en UNE requête. Tout le
+    // sync coûteux (appel Graph + déduplication + rafraîchissement des
+    // transcriptions) est déporté en arrière-plan via after() pour ne PAS
+    // bloquer le chargement de la page. Les éventuelles nouvelles réunions
+    // apparaissent au rafraîchissement suivant.
     const meetings = await prisma.meeting.findMany({
       where: {
         OR: [
-          { organizerId: session.user.id },
-          { collaborators: { some: { userId: session.user.id } } },
+          { organizerId: userId },
+          { collaborators: { some: { userId } } },
         ],
       },
       select: {
@@ -78,47 +61,46 @@ export async function GET(req: NextRequest) {
       take: 30,
     })
 
-    // Vérification globale des transcriptions en arrière-plan.
-    // On ne se limite plus aux 3 premières réunions affichées : on rattrape
-    // tout l'historique visible de l'utilisateur pour auto-corriger les faux
-    // "Sans transcription" laissés par d'anciens échecs Graph.
-    const now = new Date()
-    const userId = session.user.id
-    const toCheck = await prisma.meeting.findMany({
-      where: {
-        joinUrl: { not: null },
-        endDateTime: { lt: now },
-        AND: [
-          {
-            OR: [
-              { organizerId: userId },
-              { collaborators: { some: { userId } } },
-            ],
-          },
-          {
-            OR: [
-              { hasTranscription: false },
-              { durationMinutes: null },
-            ],
-          },
-        ],
-      },
-      select: {
-        id: true,
-        subject: true,
-        joinUrl: true,
-        hasTranscription: true,
-        durationMinutes: true,
-      },
-      orderBy: { endDateTime: 'desc' },
-      take: 200,
-    })
+    after(async () => {
+      try {
+        const graphMeetings = await getRecentMeetings(userId)
 
-    if (toCheck.length > 0) {
-      after(async () => {
-        await refreshMeetingsTranscriptionMetadata(userId, toCheck, { concurrency: 5 })
-      })
-    }
+        // Dossiers actifs pour l'auto-association (dégradé si indisponible)
+        let dossiers: Array<{ id: string; denomination: string }> = []
+        try {
+          dossiers = await prisma.dossier.findMany({
+            where: { statut: { not: 'ARCHIVE' } },
+            select: { id: true, denomination: true },
+          })
+        } catch {
+          // table dossier indisponible — on continue sans auto-association
+        }
+
+        // Sync dédupliqué en lot (1 lecture dans le cas courant)
+        await syncUserMeetings(graphMeetings, userId, dossiers)
+
+        // Rattrapage des métadonnées de transcription pour les réunions terminées
+        const now = new Date()
+        const toCheck = await prisma.meeting.findMany({
+          where: {
+            joinUrl: { not: null },
+            endDateTime: { lt: now },
+            AND: [
+              { OR: [{ organizerId: userId }, { collaborators: { some: { userId } } }] },
+              { OR: [{ hasTranscription: false }, { durationMinutes: null }] },
+            ],
+          },
+          select: { id: true, subject: true, joinUrl: true, hasTranscription: true, durationMinutes: true },
+          orderBy: { endDateTime: 'desc' },
+          take: 200,
+        })
+        if (toCheck.length > 0) {
+          await refreshMeetingsTranscriptionMetadata(userId, toCheck, { concurrency: 5 })
+        }
+      } catch (err) {
+        logger.warn({ err, scope: 'meetings/background-sync' }, 'background sync failed')
+      }
+    })
 
     // Réponse immédiate — joinUrl et durationMinutes non nécessaires côté client dashboard
     return NextResponse.json(
