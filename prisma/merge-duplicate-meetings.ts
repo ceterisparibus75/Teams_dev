@@ -23,7 +23,15 @@
  */
 import 'dotenv/config'
 import { prisma } from '../src/lib/prisma'
-import { computeDedupKey } from '../src/lib/meeting-sync'
+
+// Réplique exacte de computeDedupKey() de src/lib/meeting-sync.ts. Inliné ici
+// pour garder ce script ops autonome (sans dépendance aux alias @/ qui exigent
+// une config tsconfig-paths). Toute évolution de la clé doit rester synchrone.
+function computeDedupKey(m: { joinUrl?: string | null; startDateTime: string | Date }): string | null {
+  const joinUrl = m.joinUrl?.trim()
+  if (!joinUrl) return null
+  return `${joinUrl}::${new Date(m.startDateTime).toISOString()}`
+}
 
 const STATUS_RANK: Record<string, number> = { SENT: 3, VALIDATED: 2, DRAFT: 1 }
 
