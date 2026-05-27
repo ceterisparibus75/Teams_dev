@@ -205,6 +205,16 @@ Si un participant a un email @bl-aj.fr, sa catégorie est obligatoirement :
 - Redressement judiciaire ou Sauvegarde → 'administrateur_judiciaire'
 Les catégories JSON autorisées restent : debiteur, conseil_debiteur, partenaire_bancaire, conseil_partenaire, auditeur_expert, mandataire_ad_hoc, conciliateur, administrateur_judiciaire, mandataire_judiciaire, actionnaire, repreneur, autre. Elles servent uniquement au classement dans le JSON.
 Tout autre participant doit être catégorisé selon son rôle réel dans le dossier, déduit de la transcription et de l’invitation.
+
+⚠⚠ IDENTIFICATION DU CAMP D’UN CONSEIL (conseil_debiteur vs conseil_partenaire) — RÈGLE STRICTE :
+Un conseil (avocat, conseil juridique ou financier) se catégorise UNIQUEMENT selon la partie qu’il représente, jamais selon le simple fait qu’il évoque les banques, les dettes bancaires ou les partenaires financiers.
+- conseil_debiteur : conseil mandaté par l’entreprise, son dirigeant ou ses actionnaires (il défend les intérêts de l’entreprise, s’exprime pour elle, a été présenté du côté de l’entreprise).
+- conseil_partenaire : conseil mandaté par une banque ou un créancier financier (il défend les intérêts d’un établissement financier).
+Indices à appliquer, par ordre de priorité :
+1. COHÉRENCE PAR CABINET / EMPLOYEUR (règle prioritaire et impérative) : plusieurs participants partageant le même cabinet, la même société ou le même domaine d’adresse email appartiennent au MÊME camp et reçoivent OBLIGATOIREMENT la même catégorie. Si un ou plusieurs collègues d’un même cabinet sont identifiés comme conseil_debiteur, alors TOUS les avocats/conseils de ce cabinet sont conseil_debiteur (et symétriquement pour conseil_partenaire). Il est INTERDIT de répartir les membres d’un même cabinet dans deux camps opposés. Avant d’attribuer la catégorie d’un conseil, vérifie le cabinet/le domaine email de ses collègues présents et aligne-toi dessus.
+2. Pour qui le conseil parle-t-il : la partie dont il porte la parole, qu’il assiste explicitement, ou aux côtés de laquelle il a été présenté.
+3. À défaut de tout autre indice : un avocat ou conseil intervenant dans le dossier est rattaché par défaut à l’entreprise (conseil_debiteur), les établissements financiers disposant rarement d’un conseil dédié présent en réunion.
+En cas d’ambiguïté persistante, conserver impérativement la cohérence avec les collègues du même cabinet et signaler le doute dans "points_vigilance" plutôt que de risquer un classement opposé à celui des collègues.
 email : recopie exactement l’adresse email depuis la liste Teams pour chaque participant.
 societe_qualite : rédige ce champ en langage naturel, clair et professionnel. Ne jamais utiliser le mot "débiteur". Exemples acceptables : "Ikki Partners — Conseil de l’entreprise", "Groupe BHEEKAREE — Direction", "Cabinet Ofijes — Expert-comptable".
 resume : 5 à 8 phrases couvrant la situation de l’entreprise, les enjeux principaux, les décisions ou orientations actées et les suites attendues. Le résumé doit être concret, utile, rédigé au passé composé et respecter la terminologie obligatoire.
@@ -295,6 +305,7 @@ const GENERER_PV_TOOL: Anthropic.Tool = {
             presence: { type: 'string', enum: ['Visioconférence', 'Présentiel', 'Téléphonique', 'Absent'] },
             categorie: {
               type: 'string',
+              description: 'Catégorie selon la partie représentée. Pour un conseil (avocat/conseil), distinguer conseil_debiteur (mandaté par l\'entreprise) de conseil_partenaire (mandaté par une banque) selon QUI il représente, pas le sujet abordé. IMPÉRATIF : les conseils d\'un même cabinet / domaine email partagent la même catégorie — ne jamais les répartir dans deux camps. À défaut d\'indice, un avocat du dossier est conseil_debiteur.',
               enum: [
                 'debiteur', 'conseil_debiteur', 'partenaire_bancaire', 'conseil_partenaire',
                 'auditeur_expert', 'mandataire_ad_hoc', 'conciliateur', 'administrateur_judiciaire',
