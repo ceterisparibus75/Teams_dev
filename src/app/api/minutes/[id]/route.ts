@@ -40,22 +40,25 @@ export async function GET(
     (Date.now() - new Date(startedAt).getTime()) > 8 * 60 * 1000
   const actualGenerating = generating && !timedOut
 
+  let responseContent = raw
+  let generationError: string | null = null
+
   if (timedOut) {
-    const errorMsg = 'La génération a pris trop de temps. Cliquez sur "Régénérer le procès-verbal" pour réessayer.'
-    await prisma.meetingMinutes.update({
+    generationError = 'La génération a pris trop de temps. Cliquez sur "Régénérer le procès-verbal" pour réessayer.'
+    const updatedMinutes = await prisma.meetingMinutes.update({
       where: { id },
       data: {
         isGenerating: false,
-        content: toPrismaJson({ ...raw, _generating: false, _generationError: errorMsg }),
+        content: toPrismaJson({ ...raw, _generating: false, _generationError: generationError }),
       },
     })
+    responseContent = updatedMinutes.content as Record<string, unknown>
+  } else {
+    generationError = typeof raw?._generationError === 'string' ? raw._generationError : null
   }
 
-  const generationError = timedOut
-    ? 'La génération a pris trop de temps. Cliquez sur "Régénérer le procès-verbal" pour réessayer.'
-    : (typeof raw?._generationError === 'string' ? raw._generationError : null)
-  const qualityAlerts = getMinutesQualityAlerts(minutes.content as MinutesContent)
-  return NextResponse.json({ ...minutes, generating: actualGenerating, generationError, qualityAlerts })
+  const qualityAlerts = getMinutesQualityAlerts(responseContent as MinutesContent)
+  return NextResponse.json({ ...minutes, content: responseContent, generating: actualGenerating, generationError, qualityAlerts })
 }
 
 export async function PATCH(
