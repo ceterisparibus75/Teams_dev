@@ -37,12 +37,22 @@ function buildHtmlBody(subject: string, content: MinutesContent): string {
        </table>`
     : '<p><em>Aucune action à suivre.</em></p>'
 
+  // Rubrique fusionnée : notes libres + points de vigilance sous un seul titre
+  const notes = content.notes?.trim()
+  const vigilance = ((content as { _pv?: { points_vigilance?: string[] } })._pv?.points_vigilance ?? [])
+    .filter((p) => p?.trim())
+  const notesVigilanceHtml = notes || vigilance.length
+    ? `<h3>Notes complémentaires et points de vigilance</h3>
+       ${notes ? `<p>${formatHtmlText(notes)}</p>` : ''}
+       ${vigilance.length ? `<ul>${vigilance.map((p) => `<li>${formatHtmlText(p)}</li>`).join('')}</ul>` : ''}`
+    : ''
+
   return `
     <div style="font-family:Arial,sans-serif;max-width:700px">
       <h2 style="color:#1F2937">Compte rendu — ${escapeHtml(subject)}</h2>
       <p>${formatHtmlText(content.summary)}</p>
       <h3>Actions à suivre</h3>${actionsHtml}
-      ${content.notes ? `<h3>Notes complémentaires</h3><p>${formatHtmlText(content.notes)}</p>` : ''}
+      ${notesVigilanceHtml}
       <hr/>
       <p style="color:#6B7280;font-size:12px">SELAS BL & Associés — Administrateurs Judiciaires</p>
     </div>`

@@ -800,27 +800,31 @@ export default function MinutesDetailPage() {
             <h2 className="text-lg font-semibold text-gray-900">Actions à suivre</h2>
             <SectionEditor section={ACTION_SECTION} content={content} onChange={updateContent} />
           </div>
-          <div className="bg-white border border-gray-200 rounded-xl p-6 space-y-3">
-            <h2 className="text-lg font-semibold text-gray-900">Notes complémentaires</h2>
+          {/* Rubrique fusionnée : notes libres + points de vigilance sous un seul titre */}
+          <div className="bg-white border border-gray-200 rounded-xl p-6 space-y-4">
+            <h2 className="text-lg font-semibold text-gray-900">Notes complémentaires et points de vigilance</h2>
             <SectionEditor section={NOTES_SECTION} content={content} onChange={updateContent} />
+            {pvContent && (
+              <div className="space-y-2">
+                <label htmlFor="pv-vigilance" className="text-xs font-medium text-gray-500">
+                  Points de vigilance
+                </label>
+                <textarea
+                  id="pv-vigilance"
+                  value={pvContent.points_vigilance?.join('\n') ?? ''}
+                  onChange={(e) => {
+                    updatePointsVigilance(e.target.value)
+                    e.target.style.height = 'auto'
+                    e.target.style.height = `${e.target.scrollHeight}px`
+                  }}
+                  rows={6}
+                  style={{ minHeight: '9rem' }}
+                  placeholder="Un point de vigilance par ligne…"
+                  className="w-full border border-gray-200 rounded-lg p-4 text-sm text-gray-700 leading-relaxed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 resize-y overflow-auto"
+                />
+              </div>
+            )}
           </div>
-          {pvContent && (
-            <div className="bg-white border border-gray-200 rounded-xl p-6 space-y-3">
-              <h2 className="text-lg font-semibold text-gray-900">Points de vigilance</h2>
-              <textarea
-                value={pvContent.points_vigilance?.join('\n') ?? ''}
-                onChange={(e) => {
-                  updatePointsVigilance(e.target.value)
-                  e.target.style.height = 'auto'
-                  e.target.style.height = `${e.target.scrollHeight}px`
-                }}
-                rows={6}
-                style={{ minHeight: '9rem' }}
-                placeholder="Un point de vigilance par ligne…"
-                className="w-full border border-amber-200 rounded-lg p-4 text-sm text-gray-700 leading-relaxed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 resize-y overflow-auto"
-              />
-            </div>
-          )}
         </>
       ) : (
         sections.map((section) => (

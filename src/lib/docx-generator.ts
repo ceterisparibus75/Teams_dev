@@ -441,6 +441,27 @@ function contentHeading(text: string, cfg: TemplateConfig): Paragraph {
   })
 }
 
+// Rubrique fusionnée : un seul titre, puis le texte des notes libres PUIS la
+// liste des points de vigilance (sans avertissement spécifique). Les données
+// restent deux champs distincts (content.notes + _pv.points_vigilance).
+function buildNotesVigilanceBlock(
+  content: MinutesContent,
+  pvData: PvContent | undefined,
+  cfg: TemplateConfig,
+): (Paragraph | Table)[] {
+  const notes = content.notes?.trim()
+  const vigilance = (pvData?.points_vigilance ?? []).filter((p) => p?.trim())
+  if (!notes && vigilance.length === 0) return []
+
+  const blocks: (Paragraph | Table)[] = [
+    contentHeading('Notes complémentaires et points de vigilance', cfg),
+  ]
+  if (notes) blocks.push(bodyPara(notes, cfg))
+  vigilance.forEach((p) => blocks.push(bulletPara(p, cfg)))
+  blocks.push(empty(80))
+  return blocks
+}
+
 function numberedItem(index: number, text: string, cfg: TemplateConfig): Paragraph {
   return new Paragraph({
     children: [new TextRun({ text: `${index}. ${text}`, size: hp(cfg.taillePoliceCorps), font: cfg.policeCorps })],
@@ -621,23 +642,16 @@ export async function generateDocx(params: {
       contentBlocks.push(actionsTable(content.actions, cfg))
     }
     contentBlocks.push(empty(80))
-
-    if (content.notes?.trim()) {
-      contentBlocks.push(contentHeading('Notes complémentaires', cfg))
-      contentBlocks.push(bodyPara(content.notes.trim(), cfg))
-      contentBlocks.push(empty(80))
-    }
   } else {
     for (const section of sections) {
+      // 'notes' est rendu via la rubrique fusionnée ci-dessous
+      if (section.id === 'notes') continue
       contentBlocks.push(contentHeading(section.label, cfg))
       if (section.id === 'summary') {
         contentBlocks.push(bodyPara(content.summary?.trim() || 'Aucun résumé disponible.', cfg))
       } else if (section.id === 'actions') {
         if (!content.actions?.length) contentBlocks.push(bodyPara('Aucune action à suivre.', cfg))
         else contentBlocks.push(actionsTable(content.actions, cfg))
-      } else if (section.id === 'notes') {
-        const text = content.notes?.trim()
-        contentBlocks.push(bodyPara(text || '—', cfg))
       } else {
         const value = content[section.id]
         if (typeof value === 'string' && value.trim()) contentBlocks.push(bodyPara(value, cfg))
@@ -646,15 +660,8 @@ export async function generateDocx(params: {
     }
   }
 
-  // ── Points de vigilance (en fin, réservés à l'auteur) ─────────────────────
-  if (pvData?.points_vigilance?.length) {
-    contentBlocks.push(empty(200))
-    contentBlocks.push(new Paragraph({
-      children: [new TextRun({ text: '⚠ Points de vigilance — à valider avant diffusion', bold: true, size: hp(cfg.taillePoliceTitre2), color: 'B45309', font: cfg.policeTitres })],
-      spacing: { before: 200, after: 100 },
-    }))
-    pvData.points_vigilance.forEach((p) => contentBlocks.push(bulletPara(p, cfg)))
-  }
+  // ── Notes complémentaires et points de vigilance (rubrique fusionnée) ──────
+  contentBlocks.push(...buildNotesVigilanceBlock(content, pvData, cfg))
 
   // ── Signature ─────────────────────────────────────────────────────────────
   const signataireText = pvData?.metadata.signataire
