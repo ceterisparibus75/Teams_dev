@@ -3,6 +3,7 @@ import { getServerSession } from 'next-auth'
 import { z } from 'zod'
 import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
+import { canManageResource } from '@/lib/authz'
 import { refreshMeetingsTranscriptionMetadata } from '@/lib/meeting-transcription-sync'
 
 const PatchSchema = z
@@ -91,6 +92,11 @@ export async function PATCH(
 
   const existing = await prisma.dossier.findUnique({ where: { id } })
   if (!existing) return NextResponse.json({ error: 'Introuvable' }, { status: 404 })
+
+  // Seul le créateur ou un rôle privilégié peut modifier le dossier
+  if (!canManageResource(session, existing)) {
+    return NextResponse.json({ error: 'Action réservée au créateur ou à un administrateur' }, { status: 403 })
+  }
 
   if (body.reference && body.reference !== existing.reference) {
     const conflict = await prisma.dossier.findUnique({ where: { reference: body.reference } })

@@ -3,6 +3,7 @@ import { getServerSession } from 'next-auth'
 import { z } from 'zod'
 import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
+import { canManageResource } from '@/lib/authz'
 
 const PatchSchema = z
   .object({
@@ -44,6 +45,10 @@ export async function PATCH(
   const existing = await prisma.prompt.findUnique({ where: { id } })
   if (!existing) return NextResponse.json({ error: 'Introuvable' }, { status: 404 })
 
+  if (!canManageResource(session, existing)) {
+    return NextResponse.json({ error: 'Action réservée au créateur ou à un administrateur' }, { status: 403 })
+  }
+
   const updated = await prisma.prompt.update({
     where: { id },
     data: {
@@ -65,6 +70,11 @@ export async function DELETE(
   if (!session?.user?.id) return NextResponse.json({ error: 'Non autorisé' }, { status: 401 })
 
   const { id } = await params
+  const existing = await prisma.prompt.findUnique({ where: { id } })
+  if (!existing) return NextResponse.json({ error: 'Introuvable' }, { status: 404 })
+  if (!canManageResource(session, existing)) {
+    return NextResponse.json({ error: 'Action réservée au créateur ou à un administrateur' }, { status: 403 })
+  }
   await prisma.prompt.delete({ where: { id } })
   return NextResponse.json({ success: true })
 }

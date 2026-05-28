@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
+import { isPrivileged } from '@/lib/authz'
 import { TemplateUpsertSchema } from '@/schemas/template.schema'
 
 export async function GET(req: NextRequest) {
@@ -22,6 +23,10 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const session = await getServerSession(authOptions)
   if (!session?.user?.id) return NextResponse.json({ error: 'Non autorisé' }, { status: 401 })
+  // Templates globaux (sans createdById) — création réservée aux rôles privilégiés
+  if (!isPrivileged(session.user.role)) {
+    return NextResponse.json({ error: 'Action réservée à un administrateur' }, { status: 403 })
+  }
 
   const parsed = TemplateUpsertSchema.safeParse(await req.json().catch(() => null))
   if (!parsed.success) {

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
+import { isPrivileged } from '@/lib/authz'
 import { TemplateUpsertSchema } from '@/schemas/template.schema'
 
 // PATCH accepte un objet partiel : on rend tous les champs optionnels.
@@ -13,6 +14,10 @@ export async function PATCH(
 ) {
   const session = await getServerSession(authOptions)
   if (!session?.user?.id) return NextResponse.json({ error: 'Non autorisé' }, { status: 401 })
+  // Le modèle Template n'a pas de createdById → réservé aux rôles privilégiés
+  if (!isPrivileged(session.user.role)) {
+    return NextResponse.json({ error: 'Action réservée à un administrateur' }, { status: 403 })
+  }
 
   const { id } = await params
   const parsed = PatchSchema.safeParse(await req.json().catch(() => null))
@@ -38,6 +43,9 @@ export async function DELETE(
 ) {
   const session = await getServerSession(authOptions)
   if (!session?.user?.id) return NextResponse.json({ error: 'Non autorisé' }, { status: 401 })
+  if (!isPrivileged(session.user.role)) {
+    return NextResponse.json({ error: 'Action réservée à un administrateur' }, { status: 403 })
+  }
 
   const { id } = await params
   await prisma.template.delete({ where: { id } })
