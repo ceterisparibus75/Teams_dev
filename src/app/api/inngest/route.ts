@@ -13,8 +13,15 @@ export const maxDuration = 300
 
 // Endpoint exposé à Inngest. En dev local, lancer `npx inngest-cli dev`
 // puis ouvrir http://localhost:8288 pour le dashboard.
-// En prod : Inngest découvre cette URL via la signing key + intégration Vercel.
+//
+// En prod, on ÉPINGLE serveHost à l'alias public stable via INNGEST_SERVE_HOST
+// (ex. https://teams-dev-tau.vercel.app). Sans ce pin, l'auto-détection peut
+// enregistrer une URL de déploiement protégée par Vercel Authentication →
+// Inngest reçoit 401 → fonctions jamais invoquées (cause de l'incident silencieux
+// du 27/04 au 27/05). Le pin survit à chaque re-sync.
+const serveHost = process.env.INNGEST_SERVE_HOST
 export const { GET, POST, PUT } = serve({
   client: inngest,
   functions: [generatePvJob, purgeEditLogsJob],
+  ...(serveHost ? { serveHost } : {}),
 })
