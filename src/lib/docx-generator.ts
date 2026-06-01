@@ -684,6 +684,21 @@ export async function generateDocx(params: {
   ]
 
   const doc = new Document({
+    // Police par défaut du document : sans cela Word retombe sur Times pour
+    // tout TextRun n'ayant pas de `font:` explicite (pied de page, en-tête
+    // texte, espaces entre éléments, annexes). On force Utsaah (cfg.policeCorps)
+    // ; les runs qui doivent utiliser une autre police (titres, etc.) gardent
+    // leur `font:` explicite et ne sont pas affectés.
+    styles: {
+      default: {
+        document: {
+          run: {
+            font: cfg.policeCorps,
+            size: hp(cfg.taillePoliceCorps),
+          },
+        },
+      },
+    },
     sections: [{
       // titlePage active un en-tête/pied distinct pour la 1re page : on y met le
       // logo, et l'en-tête `default` (pages 2+) en est dépourvu. Le pied est
