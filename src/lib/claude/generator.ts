@@ -94,12 +94,14 @@ export async function generateMinutesContent(
   )
 
   // stream().finalMessage() requis pour les appels potentiellement longs.
-  // max_tokens=16000 : suffisant pour un PV très détaillé, évite stop_reason=max_tokens.
+  // max_tokens=32000 : une réunion longue (2-3 h) produit un PV volumineux ; en dessous
+  // le JSON tool_use est tronqué (stop_reason=max_tokens) et les dernières sections
+  // du PV manquent. Le streaming autorise ce budget sans risque de timeout HTTP.
   const callClaude = () =>
     client.messages
       .stream({
         model,
-        max_tokens: 16000,
+        max_tokens: 32000,
         system: systemPrompt,
         tools: [GENERER_PV_TOOL],
         tool_choice: { type: 'tool', name: 'generer_pv' },

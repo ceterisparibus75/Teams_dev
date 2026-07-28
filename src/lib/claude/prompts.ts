@@ -376,12 +376,72 @@ const GENERER_PV_TOOL: Anthropic.Tool = {
 
 // ─── buildPrompt ──────────────────────────────────────────────────────────────
 
-// Transcription tronquée pour rester dans un budget de tokens raisonnable.
-// Stratégie début+milieu+fin : ouverture (contexte, enjeux) + sample du milieu (discussions)
-// + clôture (décisions, actions, prochaine réunion).
-const MAX_HEAD_CHARS = 40_000
-const MAX_MIDDLE_CHARS = 10_000
-const MAX_TAIL_CHARS = 10_000
+// Budget de transcription. Claude Opus 4.7 dispose d'une fenêtre de 1 M tokens :
+// une réunion de 3 h fait ~150 000 caractères et passe donc intégralement.
+// On ne tronque qu'au-delà de ~9 h de réunion (~200 k tokens en entrée).
+const MAX_TRANSCRIPT_CHARS = 500_000
+
+// Au-delà du budget : échantillonnage régulier sur toute la durée + clôture complète.
+// Contrairement à une coupe début/milieu/fin, cela évite un trou de plusieurs heures
+// et garantit que la fin de réunion (décisions, actions) est toujours entière.
+const SAMPLED_TAIL_CHARS = 60_000
+const SAMPLE_SEGMENTS = 12
+
+// Les coupes sont alignées sur les retours à la ligne : une ligne de transcript
+// vaut un tour de parole ("[Nom] texte"), on ne la coupe jamais en deux.
+function sliceOnLineBoundaries(text: string, from: number, to: number): string {
+  const rawFrom = Math.max(0, from)
+  const rawTo = Math.min(text.length, to)
+  if (rawTo <= rawFrom) return ''
+
+  let start = rawFrom
+  if (start > 0) {
+    const nl = text.indexOf('\n', start)
+    start = nl === -1 ? text.length : nl + 1
+  }
+
+  let end = rawTo
+  if (end < text.length) {
+    const nl = text.lastIndexOf('\n', end)
+    end = nl === -1 ? 0 : nl
+  }
+
+  // Transcript sans retour à la ligne (cas dégénéré) : coupe brute.
+  return end > start ? text.slice(start, end) : text.slice(rawFrom, rawTo)
+}
+
+function truncateTranscript(transcription: string): string {
+  if (transcription.length <= MAX_TRANSCRIPT_CHARS) return transcription
+
+  const tail = sliceOnLineBoundaries(
+    transcription,
+    transcription.length - SAMPLED_TAIL_CHARS,
+    transcription.length,
+  )
+  const body = transcription.slice(0, transcription.length - tail.length)
+
+  const windowSize = Math.floor(body.length / SAMPLE_SEGMENTS)
+  const keepPerWindow = Math.floor((MAX_TRANSCRIPT_CHARS - tail.length) / SAMPLE_SEGMENTS)
+
+  const parts = [
+    'NOTE : transcription exceptionnellement longue. Elle est fournie sous forme ' +
+      "d'extraits répartis régulièrement sur toute la durée de la réunion, suivis de " +
+      'la clôture complète. Les passages omis sont signalés.',
+  ]
+
+  for (let i = 0; i < SAMPLE_SEGMENTS; i++) {
+    const from = i * windowSize
+    const chunk = sliceOnLineBoundaries(body, from, from + keepPerWindow)
+    if (chunk) parts.push(chunk)
+    const omitted = windowSize - chunk.length
+    if (omitted > 0) {
+      parts.push(`[… ${omitted.toLocaleString('fr-FR')} caractères omis …]`)
+    }
+  }
+
+  parts.push(tail)
+  return parts.join('\n\n')
+}
 
 export function buildPrompt(
   subject: string,
@@ -421,18 +481,7 @@ export function buildPrompt(
       }).join('\n')}`
     : ''
 
-  let safeTranscription = transcription
-  if (safeTranscription && safeTranscription.length > MAX_HEAD_CHARS + MAX_MIDDLE_CHARS + MAX_TAIL_CHARS) {
-    const head = safeTranscription.slice(0, MAX_HEAD_CHARS)
-    const middleStart = Math.floor((safeTranscription.length - MAX_MIDDLE_CHARS) / 2)
-    const middle = safeTranscription.slice(middleStart, middleStart + MAX_MIDDLE_CHARS)
-    const tail = safeTranscription.slice(-MAX_TAIL_CHARS)
-    const omitted1 = middleStart - MAX_HEAD_CHARS
-    const omitted2 = safeTranscription.length - MAX_TAIL_CHARS - (middleStart + MAX_MIDDLE_CHARS)
-    safeTranscription =
-      `${head}\n\n[… ${omitted1.toLocaleString('fr')} caractères omis …]\n\n` +
-      `${middle}\n\n[… ${omitted2.toLocaleString('fr')} caractères omis …]\n\n${tail}`
-  }
+  const safeTranscription = transcription ? truncateTranscript(transcription) : transcription
 
   const transcriptionBlock = safeTranscription
     ? `TRANSCRIPTION DE LA RÉUNION :\n\n${safeTranscription}`

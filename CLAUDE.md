@@ -205,7 +205,8 @@ BOT_AUDIO_DIR         # Dossier audio temporaire (défaut: /tmp/bot-audio)
 `src/lib/claude-generator.ts` appelle **Claude Opus** (`claude-opus-4-7`) via `@anthropic-ai/sdk` avec le pattern `tool_use` (outil `generer_pv`). La réponse est validée avec Zod (`PvContentSchema`). Les prompts intègrent le domaine juridique BL&Associés (procédures amiables, collectives, finance en difficulté). Toujours en français, aucune donnée inventée.
 
 **Limites :**
-- Transcription tronquée si > 60 000 caractères (50k début + 10k fin)
+- Transcription transmise intégralement jusqu'à 500 000 caractères (~9 h de réunion). Au-delà : échantillonnage régulier sur toute la durée + 60k de clôture complète, coupes alignées sur les tours de parole (`truncateTranscript` dans `src/lib/claude/prompts.ts`)
+- `max_tokens` de sortie : 32 000 (en dessous, le JSON `tool_use` d'un PV de réunion longue est tronqué et les dernières sections manquent)
 - Modèle par défaut configurable par prompt personnalisé
 - Retry 1x si réponse vide
 

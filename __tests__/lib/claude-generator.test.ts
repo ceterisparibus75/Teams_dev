@@ -78,54 +78,85 @@ describe('parseMinutesContent', () => {
   })
 })
 
-// ─── buildPrompt — truncation 40k+10k+10k ────────────────────────────────────
+// ─── buildPrompt — troncature transcription ──────────────────────────────────
 
-describe('buildPrompt — truncation', () => {
-  const MAX_HEAD = 40_000
-  const MAX_MIDDLE = 10_000
-  const MAX_TAIL = 10_000
-  const THRESHOLD = MAX_HEAD + MAX_MIDDLE + MAX_TAIL // 60 000
+describe('buildPrompt — troncature', () => {
+  const MAX_TRANSCRIPT = 500_000
 
-  it('transcription < 60 001 chars : retournée intacte dans le prompt', () => {
-    const transcript = 'A'.repeat(THRESHOLD) // exactement 60 000 — pas tronquée
+  // Construit un transcript réaliste ("[Nom] texte\n") d'au moins `chars` caractères.
+  function buildTranscript(chars: number, marker = 'propos'): string {
+    const lines: string[] = []
+    let total = 0
+    let i = 0
+    while (total < chars) {
+      const line = `[Intervenant ${i % 5}] ${marker} numéro ${i} lors de la réunion.`
+      lines.push(line)
+      total += line.length + 1
+      i++
+    }
+    return lines.join('\n')
+  }
+
+  it('réunion de 2h41 (~150 000 chars) : transcript transmis intégralement', () => {
+    const transcript = buildTranscript(150_000)
     const prompt = buildPrompt('Sujet', transcript)
     expect(prompt).toContain(transcript)
     expect(prompt).not.toContain('caractères omis')
   })
 
-  it('transcription = 80 000 chars : contient deux marqueurs "[… X caractères omis …]"', () => {
-    const transcript = 'B'.repeat(80_000)
+  it('transcript au seuil (500 000 chars) : transmis intégralement', () => {
+    const transcript = 'A'.repeat(MAX_TRANSCRIPT)
     const prompt = buildPrompt('Sujet', transcript)
-    const matches = prompt.match(/\[… .+ caractères omis …\]/g)
-    expect(matches).not.toBeNull()
-    expect(matches!.length).toBe(2)
+    expect(prompt).toContain(transcript)
+    expect(prompt).not.toContain('caractères omis')
   })
 
-  it('transcription = 80 000 chars : les 40 000 premiers chars sont présents', () => {
-    // On distingue début / milieu / fin avec des caractères différents
-    const head = 'H'.repeat(MAX_HEAD)
-    const rest = 'R'.repeat(80_000 - MAX_HEAD)
-    const transcript = head + rest
+  it('au-delà du seuil : échantillonné et signalé', () => {
+    const transcript = buildTranscript(700_000)
     const prompt = buildPrompt('Sujet', transcript)
-    // Le prompt doit contenir un bloc de H consécutifs de taille MAX_HEAD
-    expect(prompt).toContain(head)
+    expect(prompt).not.toContain(transcript)
+    expect(prompt).toContain('caractères omis')
+    expect(prompt).toContain('extraits répartis régulièrement')
   })
 
-  it('transcription = 80 000 chars : les 10 000 derniers chars sont présents', () => {
-    const init = 'I'.repeat(80_000 - MAX_TAIL)
-    const tail = 'T'.repeat(MAX_TAIL)
-    const transcript = init + tail
+  it('au-delà du seuil : la fin de la réunion est conservée en entier', () => {
+    const body = buildTranscript(700_000)
+    const closing = '\n[Président] Décision finale actée, la séance est levée.'
+    const transcript = body + closing
     const prompt = buildPrompt('Sujet', transcript)
-    expect(prompt).toContain(tail)
+    expect(prompt).toContain('Décision finale actée, la séance est levée.')
+    // La clôture doit être bien plus large que quelques lignes.
+    expect(prompt).toContain(transcript.slice(-50_000))
   })
 
-  it('transcription = 80 000 chars : un extrait du milieu est présent', () => {
-    // Milieu centré autour du caractère (80000 - 10000) / 2 = 35000
-    const transcript = 'X'.repeat(80_000)
-    const middleStart = Math.floor((80_000 - MAX_MIDDLE) / 2)
-    const middle = transcript.slice(middleStart, middleStart + MAX_MIDDLE)
+  it('au-delà du seuil : les extraits couvrent toute la durée, pas seulement le début', () => {
+    const transcript = buildTranscript(700_000)
     const prompt = buildPrompt('Sujet', transcript)
-    expect(prompt).toContain(middle)
+
+    const indicesOf = (text: string) =>
+      [...text.matchAll(/propos numéro (\d+) /g)].map((m) => Number(m[1]))
+
+    const total = Math.max(...indicesOf(transcript))
+    const kept = new Set(indicesOf(prompt))
+
+    // Chaque cinquième de la réunion doit être représenté dans les extraits.
+    for (let fifth = 0; fifth < 5; fifth++) {
+      const from = Math.floor((total * fifth) / 5)
+      const to = Math.floor((total * (fifth + 1)) / 5)
+      const represented = [...kept].some((i) => i >= from && i < to)
+      expect(represented).toBe(true)
+    }
+  })
+
+  it('au-delà du seuil : les coupes respectent les lignes (aucun tour de parole coupé)', () => {
+    const transcript = buildTranscript(700_000)
+    const prompt = buildPrompt('Sujet', transcript)
+    const transcriptBlock = prompt.slice(prompt.indexOf('TRANSCRIPTION DE LA RÉUNION'))
+    const brokenLines = transcriptBlock
+      .split('\n')
+      .filter((line) => line.trim() !== '')
+      .filter((line) => !line.startsWith('[') && !line.startsWith('NOTE :') && !line.startsWith('TRANSCRIPTION'))
+    expect(brokenLines).toEqual([])
   })
 })
 
